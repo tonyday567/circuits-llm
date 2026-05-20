@@ -1,0 +1,42 @@
+cabal-version: 3.0
+name: circuits-llm
+version: 0.1.0.0
+license: BSD-3-Clause
+author: Tony Day
+maintainer: tonyday567@gmail.com
+category: nlp
+build-type: Simple
+tested-with: ghc ==9.14.1
+
+library
+  exposed-modules:
+    Circuit.LLM.BPE
+
+  build-depends:
+    base >=4.20 && <5,
+    bytestring,
+    containers,
+    deepseq,
+    text,
+    vector,
+
+  hs-source-dirs: src
+  default-language: GHC2024
+  ghc-options:
+    -Wall
+    -Wcompat
+
+test-suite test-bpe
+  type: exitcode-stdio-1.0
+  main-is: test-bpe.hs
+  build-depends:
+    base >=4.20 && <5,
+    circuits-llm,
+    text,
+    vector,
+
+  hs-source-dirs: app
+  default-language: GHC2024
+  ghc-options:
+    -Wall
+    -Wcompat
