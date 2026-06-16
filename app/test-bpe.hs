@@ -1,10 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+import Circuit.LLM.BPE
 import Control.Exception (SomeException, try)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as TIO
 import Data.Vector.Unboxed qualified as V
-import Circuit.LLM.BPE
 import System.Exit (exitFailure, exitSuccess)
 
 -- Create minimal test model file
