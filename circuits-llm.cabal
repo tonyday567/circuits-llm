@@ -15,6 +15,7 @@ library
     Circuit.LLM.GPT
     Circuit.LLM.Weights
     Circuit.LLM.Inference
+    Circuit.LLM.Training
 
   build-depends:
     base >=4.20 && <5,
@@ -95,6 +96,16 @@ executable debug-attn
     harpie
   default-language: GHC2024
   ghc-options: -O2
+
+executable test-training
+  main-is: test-training.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits-llm,
+    hmatrix
+  default-language: GHC2024
+  ghc-options: -O2 -rtsopts
 
 executable test-inference
   main-is: test-inference.hs
