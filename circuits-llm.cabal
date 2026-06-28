@@ -13,6 +13,7 @@ library
     Circuit.LLM.BPE
     Circuit.LLM.Attention
     Circuit.LLM.GPT
+    Circuit.LLM.Weights
 
   build-depends:
     base >=4.20 && <5,
@@ -92,6 +93,16 @@ executable debug-attn
     harpie
   default-language: GHC2024
   ghc-options: -O2
+
+executable test-weights
+  main-is: test-weights.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits-llm,
+    hmatrix
+  default-language: GHC2024
+  ghc-options: -O2 -rtsopts
 
 executable bench-hmatrix
   main-is: bench-hmatrix.hs
