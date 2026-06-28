@@ -71,22 +71,32 @@ zeroGptGrads cfg =
         }
 
 addGptGrads :: GptGrads -> GptGrads -> GptGrads
-addGptGrads a b = GptGrads
-  { ggWte = ggWte a + ggWte b, ggWpe = ggWpe a + ggWpe b
-  , ggBlocks = zipWith addBG (ggBlocks a) (ggBlocks b)
-  , ggLnGamma = ggLnGamma a + ggLnGamma b, ggLnBeta = ggLnBeta a + ggLnBeta b
-  , ggHead = ggHead a + ggHead b, ggHeadB = ggHeadB a + ggHeadB b
-  }
-  where addBG x y = BlockGrads
-          { bgAttnWq = bgAttnWq x + bgAttnWq y, bgAttnWk = bgAttnWk x + bgAttnWk y
-          , bgAttnWv = bgAttnWv x + bgAttnWv y, bgAttnWo = bgAttnWo x + bgAttnWo y
-          , bgAttnLnGamma = bgAttnLnGamma x + bgAttnLnGamma y
-          , bgAttnLnBeta  = bgAttnLnBeta x + bgAttnLnBeta y
-          , bgFfnW1 = bgFfnW1 x + bgFfnW1 y, bgFfnB1 = bgFfnB1 x + bgFfnB1 y
-          , bgFfnW2 = bgFfnW2 x + bgFfnW2 y, bgFfnB2 = bgFfnB2 x + bgFfnB2 y
-          , bgFfnLnGamma = bgFfnLnGamma x + bgFfnLnGamma y
-          , bgFfnLnBeta  = bgFfnLnBeta x + bgFfnLnBeta y
+addGptGrads a b =
+  let r1 = rows (ggWte a); c1 = cols (ggWte a)
+      r2 = rows (ggWte b); c2 = cols (ggWte b)
+  in  if r1 /= r2 || c1 /= c2
+        then error $ "addGptGrads Wte mismatch: (" ++ show r1 ++ "," ++ show c1 ++ ") vs (" ++ show r2 ++ "," ++ show c2 ++ ")"
+        else GptGrads
+          { ggWte = ggWte a + ggWte b, ggWpe = ggWpe a + ggWpe b
+          , ggBlocks = zipWith addBG (ggBlocks a) (ggBlocks b)
+          , ggLnGamma = ggLnGamma a + ggLnGamma b, ggLnBeta = ggLnBeta a + ggLnBeta b
+          , ggHead = ggHead a + ggHead b, ggHeadB = ggHeadB a + ggHeadB b
           }
+  where addBG x y = 
+          let r1 = rows (bgAttnWq x); c1 = cols (bgAttnWq x)
+              r2 = rows (bgAttnWq y); c2 = cols (bgAttnWq y)
+          in  if r1 /= r2 || c1 /= c2
+                then error $ "addBG Wq mismatch: (" ++ show r1 ++ "," ++ show c1 ++ ") vs (" ++ show r2 ++ "," ++ show c2 ++ ")"
+                else BlockGrads
+                  { bgAttnWq = bgAttnWq x + bgAttnWq y, bgAttnWk = bgAttnWk x + bgAttnWk y
+                  , bgAttnWv = bgAttnWv x + bgAttnWv y, bgAttnWo = bgAttnWo x + bgAttnWo y
+                  , bgAttnLnGamma = bgAttnLnGamma x + bgAttnLnGamma y
+                  , bgAttnLnBeta  = bgAttnLnBeta x + bgAttnLnBeta y
+                  , bgFfnW1 = bgFfnW1 x + bgFfnW1 y, bgFfnB1 = bgFfnB1 x + bgFfnB1 y
+                  , bgFfnW2 = bgFfnW2 x + bgFfnW2 y, bgFfnB2 = bgFfnB2 x + bgFfnB2 y
+                  , bgFfnLnGamma = bgFfnLnGamma x + bgFfnLnGamma y
+                  , bgFfnLnBeta  = bgFfnLnBeta x + bgFfnLnBeta y
+                  }
 
 scaleGptGrads :: Double -> GptGrads -> GptGrads
 scaleGptGrads s g = GptGrads

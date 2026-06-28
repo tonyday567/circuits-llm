@@ -118,6 +118,16 @@ executable test-backprop
   default-language: GHC2024
   ghc-options: -O2 -rtsopts
 
+executable test-training-full
+  main-is: test-training-full.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits-llm,
+    hmatrix
+  default-language: GHC2024
+  ghc-options: -O2 -rtsopts
+
 executable test-training
   main-is: test-training.hs
   hs-source-dirs: app
