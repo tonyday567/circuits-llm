@@ -14,6 +14,7 @@ library
     Circuit.LLM.Attention
     Circuit.LLM.GPT
     Circuit.LLM.Weights
+    Circuit.LLM.Inference
 
   build-depends:
     base >=4.20 && <5,
@@ -22,6 +23,7 @@ library
     deepseq,
     harpie,
     hmatrix,
+    random,
     text,
     vector,
 
@@ -93,6 +95,16 @@ executable debug-attn
     harpie
   default-language: GHC2024
   ghc-options: -O2
+
+executable test-inference
+  main-is: test-inference.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits-llm,
+    hmatrix
+  default-language: GHC2024
+  ghc-options: -O2 -rtsopts
 
 executable test-weights
   main-is: test-weights.hs
