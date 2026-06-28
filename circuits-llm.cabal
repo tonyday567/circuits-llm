@@ -11,18 +11,23 @@ tested-with: ghc ==9.14.1
 library
   exposed-modules:
     Circuit.LLM.BPE
+    Circuit.LLM.Attention
+    Circuit.LLM.GPT
 
   build-depends:
     base >=4.20 && <5,
     bytestring,
     containers,
     deepseq,
+    harpie,
+    hmatrix,
     text,
     vector,
 
   hs-source-dirs: src
   default-language: GHC2024
   ghc-options:
+    -O2
     -Wall
     -Wcompat
 
@@ -37,6 +42,74 @@ test-suite test-bpe
 
   hs-source-dirs: app
   default-language: GHC2024
+  ghc-options: -O2
   ghc-options:
     -Wall
     -Wcompat
+executable quick-test
+  main-is: quick-test.hs
+  hs-source-dirs: app
+  build-depends: base, circuits-llm, text, bytestring, containers, vector
+  default-language: GHC2024
+  ghc-options: -O2
+
+executable bench
+  main-is: bench.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    bytestring,
+    circuits-llm,
+    circuits-meter,
+    containers,
+    text,
+    vector
+  default-language: GHC2024
+  ghc-options: -O2
+  ghc-options: -O2 -rtsopts
+executable test-attn
+  main-is: test-attn.hs
+  hs-source-dirs: app
+  build-depends: base, circuits-llm, harpie
+  default-language: GHC2024
+  ghc-options: -O2
+executable bench-attn
+  main-is: bench-attn.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits-llm,
+    harpie
+  default-language: GHC2024
+  ghc-options: -O2 -rtsopts
+
+executable debug-attn
+  main-is: debug-attn.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits-llm,
+    harpie
+  default-language: GHC2024
+  ghc-options: -O2
+
+executable bench-hmatrix
+  main-is: bench-hmatrix.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    harpie,
+    hmatrix
+  default-language: GHC2024
+  ghc-options: -O2
+
+executable test-gpt
+  main-is: test-gpt.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits-llm,
+    harpie,
+    hmatrix
+  default-language: GHC2024
+  ghc-options: -O2 -rtsopts

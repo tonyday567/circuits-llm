@@ -1,0 +1,5 @@
+packages:
+  circuits-llm.cabal
+  ../circuits/circuits.cabal
+  ../circuits-meter/circuits-meter.cabal
+  ../harpie/harpie.cabal
