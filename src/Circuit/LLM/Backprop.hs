@@ -1,12 +1,7 @@
 {-# LANGUAGE OverloadedStrings, BangPatterns #-}
 
--- | Manual backpropagation through the GPT-2 model.
---
--- Each operation has a backward function. The full backward pass
--- chains them together, accumulating parameter gradients.
---
--- Uses the convention: backward functions take (forward_inputs, grad_output)
--- and return (grad_input, param_gradients).
+-- | Full backward pass through one transformer block.
+--   This is the core of the training backprop chain.
 module Circuit.LLM.Backprop
   ( -- * Full backward pass
     gptBackward
@@ -28,49 +23,41 @@ module Circuit.LLM.Backprop
 
 import Circuit.LLM.GPT
   ( FeedForward (..), Gpt (..), GptConfig (..), TransformerBlock (..), forward )
+import Data.Foldable (foldl')
+import Data.List (foldl1')
 import Numeric.LinearAlgebra
-  ( Matrix, Vector, cmap, fromList, fromRows, konst, maxElement, reshape
-  , rows, cols, scale, sumElements, toList, toRows, tr
+  ( Matrix, Vector, cmap, fromList, fromLists, fromRows, maxElement, reshape
+  , rows, cols, scale, sumElements, toList, toRows, tr, (|||)
   )
 import qualified Numeric.LinearAlgebra as LA
 
 ----------------------------------------------------------------------
--- Gradient accumulators
+-- Gradient accumulators (unchanged)
 ----------------------------------------------------------------------
 
 data GptGrads = GptGrads
-  { ggWte  :: !(Matrix Double)
-  , ggWpe  :: !(Matrix Double)
+  { ggWte  :: !(Matrix Double), ggWpe  :: !(Matrix Double)
   , ggBlocks :: ![BlockGrads]
-  , ggLnGamma :: !(Vector Double)
-  , ggLnBeta  :: !(Vector Double)
-  , ggHead   :: !(Matrix Double)
-  , ggHeadB  :: !(Vector Double)
+  , ggLnGamma :: !(Vector Double), ggLnBeta  :: !(Vector Double)
+  , ggHead   :: !(Matrix Double), ggHeadB  :: !(Vector Double)
   }
 
 data BlockGrads = BlockGrads
-  { bgAttnWq :: !(Matrix Double)
-  , bgAttnWk :: !(Matrix Double)
-  , bgAttnWv :: !(Matrix Double)
-  , bgAttnWo :: !(Matrix Double)
-  , bgAttnLnGamma :: !(Vector Double)
-  , bgAttnLnBeta  :: !(Vector Double)
-  , bgFfnW1 :: !(Matrix Double)
-  , bgFfnB1 :: !(Vector Double)
-  , bgFfnW2 :: !(Matrix Double)
-  , bgFfnB2 :: !(Vector Double)
-  , bgFfnLnGamma :: !(Vector Double)
-  , bgFfnLnBeta  :: !(Vector Double)
+  { bgAttnWq, bgAttnWk, bgAttnWv, bgAttnWo :: !(Matrix Double)
+  , bgAttnLnGamma, bgAttnLnBeta :: !(Vector Double)
+  , bgFfnW1, bgFfnW2 :: !(Matrix Double)
+  , bgFfnB1, bgFfnB2 :: !(Vector Double)
+  , bgFfnLnGamma, bgFfnLnBeta :: !(Vector Double)
   }
 
 zeroGptGrads :: GptConfig -> GptGrads
 zeroGptGrads cfg =
   let nEmb = gptNEmbd cfg; nLayer = gptNLayer cfg
       vocab = gptVocabSize cfg; ffMul = 4
-      zM r c = reshape c (fromList (replicate (r * c) 0)); zV n = fromList (replicate n 0)
+      zM r c = reshape c (fromList (replicate (r * c) 0))
+      zV n = fromList (replicate n 0)
   in  GptGrads
-        { ggWte = zM vocab nEmb
-        , ggWpe = zM 1024 nEmb
+        { ggWte = zM vocab nEmb, ggWpe = zM 1024 nEmb
         , ggBlocks = replicate nLayer $ BlockGrads
             { bgAttnWq = zM nEmb nEmb, bgAttnWk = zM nEmb nEmb
             , bgAttnWv = zM nEmb nEmb, bgAttnWo = zM nEmb nEmb
@@ -86,56 +73,48 @@ zeroGptGrads cfg =
 addGptGrads :: GptGrads -> GptGrads -> GptGrads
 addGptGrads a b = GptGrads
   { ggWte = ggWte a + ggWte b, ggWpe = ggWpe a + ggWpe b
-  , ggBlocks = zipWith addBlockGrads (ggBlocks a) (ggBlocks b)
+  , ggBlocks = zipWith addBG (ggBlocks a) (ggBlocks b)
   , ggLnGamma = ggLnGamma a + ggLnGamma b, ggLnBeta = ggLnBeta a + ggLnBeta b
   , ggHead = ggHead a + ggHead b, ggHeadB = ggHeadB a + ggHeadB b
   }
-
-addBlockGrads :: BlockGrads -> BlockGrads -> BlockGrads
-addBlockGrads a b = BlockGrads
-  { bgAttnWq = bgAttnWq a + bgAttnWq b, bgAttnWk = bgAttnWk a + bgAttnWk b
-  , bgAttnWv = bgAttnWv a + bgAttnWv b, bgAttnWo = bgAttnWo a + bgAttnWo b
-  , bgAttnLnGamma = bgAttnLnGamma a + bgAttnLnGamma b
-  , bgAttnLnBeta  = bgAttnLnBeta a + bgAttnLnBeta b
-  , bgFfnW1 = bgFfnW1 a + bgFfnW1 b, bgFfnB1 = bgFfnB1 a + bgFfnB1 b
-  , bgFfnW2 = bgFfnW2 a + bgFfnW2 b, bgFfnB2 = bgFfnB2 a + bgFfnB2 b
-  , bgFfnLnGamma = bgFfnLnGamma a + bgFfnLnGamma b
-  , bgFfnLnBeta  = bgFfnLnBeta a + bgFfnLnBeta b
-  }
+  where addBG x y = BlockGrads
+          { bgAttnWq = bgAttnWq x + bgAttnWq y, bgAttnWk = bgAttnWk x + bgAttnWk y
+          , bgAttnWv = bgAttnWv x + bgAttnWv y, bgAttnWo = bgAttnWo x + bgAttnWo y
+          , bgAttnLnGamma = bgAttnLnGamma x + bgAttnLnGamma y
+          , bgAttnLnBeta  = bgAttnLnBeta x + bgAttnLnBeta y
+          , bgFfnW1 = bgFfnW1 x + bgFfnW1 y, bgFfnB1 = bgFfnB1 x + bgFfnB1 y
+          , bgFfnW2 = bgFfnW2 x + bgFfnW2 y, bgFfnB2 = bgFfnB2 x + bgFfnB2 y
+          , bgFfnLnGamma = bgFfnLnGamma x + bgFfnLnGamma y
+          , bgFfnLnBeta  = bgFfnLnBeta x + bgFfnLnBeta y
+          }
 
 scaleGptGrads :: Double -> GptGrads -> GptGrads
 scaleGptGrads s g = GptGrads
   { ggWte = scale s (ggWte g), ggWpe = scale s (ggWpe g)
-  , ggBlocks = map (scaleBlockGrads s) (ggBlocks g)
+  , ggBlocks = map (scaleBG s) (ggBlocks g)
   , ggLnGamma = scale s (ggLnGamma g), ggLnBeta = scale s (ggLnBeta g)
   , ggHead = scale s (ggHead g), ggHeadB = scale s (ggHeadB g)
   }
-
-scaleBlockGrads :: Double -> BlockGrads -> BlockGrads
-scaleBlockGrads s b = BlockGrads
-  { bgAttnWq = scale s (bgAttnWq b), bgAttnWk = scale s (bgAttnWk b)
-  , bgAttnWv = scale s (bgAttnWv b), bgAttnWo = scale s (bgAttnWo b)
-  , bgAttnLnGamma = scale s (bgAttnLnGamma b), bgAttnLnBeta = scale s (bgAttnLnBeta b)
-  , bgFfnW1 = scale s (bgFfnW1 b), bgFfnB1 = scale s (bgFfnB1 b)
-  , bgFfnW2 = scale s (bgFfnW2 b), bgFfnB2 = scale s (bgFfnB2 b)
-  , bgFfnLnGamma = scale s (bgFfnLnGamma b), bgFfnLnBeta = scale s (bgFfnLnBeta b)
-  }
+  where scaleBG s b = BlockGrads
+          { bgAttnWq = scale s (bgAttnWq b), bgAttnWk = scale s (bgAttnWk b)
+          , bgAttnWv = scale s (bgAttnWv b), bgAttnWo = scale s (bgAttnWo b)
+          , bgAttnLnGamma = scale s (bgAttnLnGamma b), bgAttnLnBeta = scale s (bgAttnLnBeta b)
+          , bgFfnW1 = scale s (bgFfnW1 b), bgFfnB1 = scale s (bgFfnB1 b)
+          , bgFfnW2 = scale s (bgFfnW2 b), bgFfnB2 = scale s (bgFfnB2 b)
+          , bgFfnLnGamma = scale s (bgFfnLnGamma b), bgFfnLnBeta = scale s (bgFfnLnBeta b)
+          }
 
 ----------------------------------------------------------------------
--- Backward primitives
+-- Backward primitives (unchanged)
 ----------------------------------------------------------------------
 
--- | Linear layer backward: y = x @ w + b (b broadcast across rows).
---   Returns (grad_x, grad_w, grad_b).
-linearBwd :: Matrix Double -> Matrix Double -> Matrix Double
-          -> (Matrix Double, Matrix Double, Vector Double)
+linearBwd :: Matrix Double -> Matrix Double -> Matrix Double -> (Matrix Double, Matrix Double, Vector Double)
 linearBwd x w gradY =
   let gradX = gradY LA.<> tr w
       gradW = tr x LA.<> gradY
       gradB = fromList [sumElements col | col <- LA.toColumns gradY]
   in  (gradX, gradW, gradB)
 
--- | GELU backward (elementwise).
 geluBwd :: Matrix Double -> Matrix Double -> Matrix Double
 geluBwd x gradY =
   let xs = toList (LA.flatten x)
@@ -145,175 +124,357 @@ geluBwd x gradY =
                     phi = 1 / (1 + exp (-z))
                     phi' = phi * (1 - phi) * a * (1 + 3 * b * v * v)
                 in  phi + v * phi'
-      result = zipWith (*) gs (map deriv xs)
-  in  reshape (cols x) (fromList result)
+  in  reshape (cols x) (fromList (zipWith (*) gs (map deriv xs)))
 
--- | Row-wise softmax backward: probs = softmax(scores), grad_out given.
---   dL/dscores_i = probs_i * (grad_out_i - sum_j probs_j * grad_out_j)
 softmaxBwd :: Matrix Double -> Matrix Double -> Matrix Double
 softmaxBwd probs gradOut =
   fromRows $ zipWith softmaxRowBwd (toRows probs) (toRows gradOut)
-  where
-    softmaxRowBwd p go =
-      let pv = toList p; gov = toList go
-          dot = sum (zipWith (*) pv gov)
-      in  fromList $ zipWith (\pi goi -> pi * (goi - dot)) pv gov
+  where softmaxRowBwd p go =
+          let pv = toList p; gov = toList go; dot = sum (zipWith (*) pv gov)
+          in  fromList $ zipWith (\pi goi -> pi * (goi - dot)) pv gov
 
--- | LayerNorm backward.
---   y = (x - mu) / sqrt(var + eps) * gamma + beta
 layerNormBwd ::
   Matrix Double -> Vector Double -> Vector Double -> Double -> Matrix Double
   -> (Matrix Double, Vector Double, Vector Double)
 layerNormBwd x gamma beta eps gradY =
-  let -- Recompute forward intermediates
+  let d = fromIntegral (cols x)
       mu = LA.fromList [sumElements row / d | row <- toRows x]
-      xm = x - LA.asColumn mu  -- x - mu, broadcast
+      xm = x - LA.asColumn mu
       var = LA.fromList [sumElements (row * row) / d | row <- toRows xm]
       invStd = cmap (\v -> 1 / sqrt (v + eps)) var
       xHat = fromRows $ zipWith (\xi s -> scale s xi) (toRows xm) (toList invStd)
-
-      -- grad w.r.t. xHat
       gradXHat = fromRows $ zipWith (\go g -> scale g go) (toRows gradY) (toList gamma)
-
-      -- grad w.r.t. gamma, beta
-      gGamma = fromList [sumElements (go * xh)
-                        | (go, xh) <- zip (toRows gradY) (toRows xHat)]
+      gGamma = fromList [sumElements (go * xh) | (go, xh) <- zip (toRows gradY) (toRows xHat)]
       gBeta  = fromList [sumElements go | go <- toRows gradY]
-
-      -- grad w.r.t. x (chain rule through xHat, invStd, var, mu, xm)
-      gradX = fromRows
-        [ gradRow (toRows gradXHat !! i) (toRows xm !! i)
-                  (toList invStd !! i) (toList var !! i)
-        | i <- [0 .. rows x - 1] ]
-
+      features = cols x
+      gradX = fromRows [ gradRow (toRows gradXHat !! i) (toRows xm !! i)
+                                   (toList invStd !! i) (toList var !! i)
+                       | i <- [0 .. rows x - 1] ]
   in  (gradX, gGamma, gBeta)
   where
-    d = fromIntegral (cols x)
-    features = cols x
     gradRow gxh xi_minus_mu is v =
-      let -- dL/d(invStd) per row
-          gInvStd = sumElements (gxh * xi_minus_mu)
-          -- dL/d(var) per row
+      let gInvStd = sumElements (gxh * xi_minus_mu)
           gVar = gInvStd * (-0.5) * (v + eps) ** (-1.5)
-          -- dL/d(xi - mu): from xHat path + var path
           gXm = scale is gxh + scale (2 * gVar / d) xi_minus_mu
-          -- dL/d(mu)
           gMu = -sumElements gXm
       in  gXm + fromList (replicate features (gMu / d))
+    d = fromIntegral (cols x); features = cols x
 
--- | Cross-entropy loss backward.
---   Returns (loss, grad_wrt_logits).
 crossEntropyBwd :: Matrix Double -> [Int] -> (Double, Matrix Double)
 crossEntropyBwd logits targetIds =
   let n = fromIntegral (rows logits)
       softmaxRows = map softmaxStable (toRows logits)
       losses = zipWith (\p t -> -log (max (toList p !! t) 1e-12)) softmaxRows targetIds
       totalLoss = sum losses / n
-      -- Gradient: (softmax - one_hot) / n
       gradRows = zipWith (\p t ->
         let pv = toList p
         in  fromList [if i == t then pv !! i - 1 else pv !! i | i <- [0 .. length pv - 1]]
         ) softmaxRows targetIds
   in  (totalLoss, scale (1 / n) (fromRows gradRows))
-  where
-    softmaxStable v =
-      let mx = maxElement v; shifted = cmap (\x -> exp (x - mx)) v
-      in  scale (1 / sumElements shifted) shifted
+  where softmaxStable v = let mx = maxElement v; shifted = cmap (\x -> exp (x - mx)) v
+                          in  scale (1 / sumElements shifted) shifted
 
 ----------------------------------------------------------------------
--- Multi-head attention backward
+-- Multi-head attention backward (per-head, summed)
 ----------------------------------------------------------------------
 
--- | Backward through multi-head attention.
---   Returns (grad_x, grad_Wq, grad_Wk, grad_Wv, grad_Wo).
-attentionBwd ::
-  Matrix Double -> Matrix Double -> Matrix Double -> Matrix Double
-  -> Matrix Double -> Matrix Double
-  -> (Matrix Double, Matrix Double, Matrix Double, Matrix Double, Matrix Double)
-attentionBwd x wQ wK wV wO gradOut =
-  let nHead = 1  -- Single head for simplicity; multi-head splits handled externally
-      dk = fromIntegral (cols wQ)  -- Using full embedding as key dim
-      -- Forward pass
-      q = x LA.<> wQ
-      k = x LA.<> wK
-      v = x LA.<> wV
+-- | Backward through one head: x -> QKV -> scores -> softmax -> context.
+--   gradOut is dL/d(context). Returns (grad_x, grad_Wq, grad_Wk, grad_Wv).
+attentionHeadBwd :: Matrix Double -> Matrix Double -> Matrix Double -> Matrix Double
+                 -> Matrix Double
+                 -> (Matrix Double, Matrix Double, Matrix Double, Matrix Double)
+attentionHeadBwd x wQ wK wV gradOut =
+  let dk = fromIntegral (cols wQ) :: Double
+      q = x LA.<> wQ; k = x LA.<> wK; v = x LA.<> wV
       scores = scale (1 / sqrt dk) (q LA.<> tr k)
-      -- mask applied externally, assume scores already masked
-      probs = softmaxStable scores
-      context = probs LA.<> v
-      out = context LA.<> wO  -- should equal gradOut source
-
-      -- Backward through output projection
-      (gradContext, gradWO, _) = linearBwd context wO gradOut
-
+      probs = softmaxStableF scores
       -- Backward through context = probs @ V
-      gradProbs = gradContext LA.<> tr v
-      gradV = tr probs LA.<> gradContext
-
+      gradProbs = gradOut LA.<> tr v
+      gradV = tr probs LA.<> gradOut
       -- Backward through softmax
       gradScores = softmaxBwd probs gradProbs
-      gradScoresScaled = scale (1 / sqrt dk) gradScores  -- scale from forward
-
+      gradScoresS = scale (1 / sqrt dk) gradScores
       -- Backward through scores = Q @ K^T
-      gradQ1 = gradScoresScaled LA.<> k         -- dL/dQ from scores @ K
-      gradK1 = tr gradScoresScaled LA.<> q     -- dL/dK from Q^T @ scores
-
-      -- Backward through Q = x @ Wq, K = x @ Wk, V = x @ Wv
-      (gradXq, gradWQ, _) = linearBwd x wQ gradQ1
-      (gradXk, gradWK, _) = linearBwd x wK gradK1
-      (gradXv, gradWV, _) = linearBwd x wV gradV
-
+      gradQ = gradScoresS LA.<> k
+      gradK = tr gradScoresS LA.<> q
+      -- Backward through projections
+      (gradXq, gWQ, _) = linearBwd x wQ gradQ
+      (gradXk, gWK, _) = linearBwd x wK gradK
+      (gradXv, gWV, _) = linearBwd x wV gradV
       gradX = gradXq + gradXk + gradXv
-  in  (gradX, gradWQ, gradWK, gradWV, gradWO)
+  in  (gradX, gWQ, gWK, gWV)
+
+softmaxStableF :: Matrix Double -> Matrix Double
+softmaxStableF m = fromRows
+  [let mx = maxElement row; s = cmap (\x -> exp (x - mx)) row
+   in  scale (1 / sumElements s) s | row <- toRows m]
+
+----------------------------------------------------------------------
+-- Block backward
+----------------------------------------------------------------------
+
+-- | Backward through one transformer block.
+--   Given gradient w.r.t. block output, returns (grad_wrt_input, BlockGrads).
+blockBackward ::
+  Int -> Int -> Double -> TransformerBlock -> Matrix Double -> Matrix Double
+  -> (Matrix Double, BlockGrads)
+blockBackward nHead seqLen eps tb xIn gradOut =
+  let hDim = cols (tbAttnWq tb) `div` nHead
+
+      -- ---- Forward pass (recompute intermediates from xIn) ----
+      -- LN1
+      an = layerNormF xIn (tbAttnLnGamma tb) (tbAttnLnBeta tb) eps
+      -- Per-head attention
+      headFwd h =
+        let wQh = subMatrixW (tbAttnWq tb) 0 (h * hDim) (rows (tbAttnWq tb)) hDim
+            wKh = subMatrixW (tbAttnWk tb) 0 (h * hDim) (rows (tbAttnWk tb)) hDim
+            wVh = subMatrixW (tbAttnWv tb) 0 (h * hDim) (rows (tbAttnWv tb)) hDim
+            qh = an LA.<> wQh; kh = an LA.<> wKh; vh = an LA.<> wVh
+            sc = scale (1 / sqrt (fromIntegral hDim :: Double)) (qh LA.<> tr kh)
+            scm = sc + causalMaskF seqLen
+            pr = softmaxStableF scm
+        in  pr LA.<> vh
+      headOuts = map headFwd [0 .. nHead - 1]
+      ctx = concatColsF headOuts
+      attnOut = ctx LA.<> tbAttnWo tb
+      postAttn = xIn + attnOut
+      -- LN2
+      fn = layerNormF postAttn (tbFfnLnGamma tb) (tbFfnLnBeta tb) eps
+      -- FFN
+      ff = tbFfn tb
+      preGelu = fn LA.<> ffW1 ff + broadcastBias (ffB1 ff) seqLen
+      hGelu = geluF preGelu
+      ffnOut = hGelu LA.<> ffW2 ff + broadcastBias (ffB2 ff) seqLen
+      xOut = postAttn + ffnOut
+
+      -- ---- Backward pass ----
+      -- gradOut = dL/d(xOut)
+      -- Residual 2 splits gradient
+      gradPostAttn2 = gradOut  -- flows to postAttn
+      gradFfnOut = gradOut      -- flows to ffnOut
+
+      -- FFN backward
+      (gradH, gW2, gB2) = linearBwd hGelu (ffW2 ff) gradFfnOut
+      gradPreGelu = geluBwd preGelu gradH
+      (gradFn, gW1, gB1) = linearBwd fn (ffW1 ff) gradPreGelu
+      (gradPostAttn1, gFfnLnGamma, gFfnLnBeta) = layerNormBwd postAttn (tbFfnLnGamma tb) (tbFfnLnBeta tb) eps gradFn
+
+      -- Combine FFN + residual gradients into postAttn
+      gradPostAttn = gradPostAttn2 + gradPostAttn1
+
+      -- Residual 1 splits: to xIn and to attnOut
+      gradXfromRes1 = gradPostAttn
+      gradAttnOut = gradPostAttn
+
+      -- Attention output projection
+      (gradCtx, gWo, _) = linearBwd ctx (tbAttnWo tb) gradAttnOut
+
+      -- Per-head backward
+      headBwd h =
+        let goh = subMatrixW gradCtx 0 (h * hDim) seqLen hDim
+            wQh = subMatrixW (tbAttnWq tb) 0 (h * hDim) nEmb hDim
+            wKh = subMatrixW (tbAttnWk tb) 0 (h * hDim) nEmb hDim
+            wVh = subMatrixW (tbAttnWv tb) 0 (h * hDim) nEmb hDim
+        in  attentionHeadBwd an wQh wKh wVh goh
+      headGrads = map headBwd [0 .. nHead - 1]
+      gradAn = foldl1' (+) [gx | (gx, _, _, _) <- headGrads]
+      gWqFull = accumulateCols (tbAttnWq tb) [(h * hDim, gwq) | (h, (_, gwq, _, _)) <- zip [0..] headGrads]
+      gWkFull = accumulateCols (tbAttnWk tb) [(h * hDim, gwk) | (h, (_, _, gwk, _)) <- zip [0..] headGrads]
+      gWvFull = accumulateCols (tbAttnWv tb) [(h * hDim, gwv) | (h, (_, _, _, gwv)) <- zip [0..] headGrads]
+
+      -- LN1 backward
+      (gradXfromAttn, gAttnLnGamma, gAttnLnBeta) = layerNormBwd xIn (tbAttnLnGamma tb) (tbAttnLnBeta tb) eps gradAn
+
+      -- Total grad w.r.t. xIn
+      gradX = gradXfromRes1 + gradXfromAttn
+
+      blockGrad = BlockGrads
+        { bgAttnWq = gWqFull, bgAttnWk = gWkFull, bgAttnWv = gWvFull, bgAttnWo = gWo
+        , bgAttnLnGamma = gAttnLnGamma, bgAttnLnBeta = gAttnLnBeta
+        , bgFfnW1 = gW1, bgFfnB1 = gB1, bgFfnW2 = gW2, bgFfnB2 = gB2
+        , bgFfnLnGamma = gFfnLnGamma, bgFfnLnBeta = gFfnLnBeta
+        }
+  in  (gradX, blockGrad)
   where
-    softmaxStable m =
-      fromRows [let mx = maxElement row; s = cmap (\x -> exp (x - mx)) row
-                    sm = sumElements s in scale (1 / sm) s | row <- toRows m]
+    nEmb = cols (tbAttnWq tb)
+    causalMaskF n = fromLists [[if j <= i then 0 else -1/0 | j <- [0..n-1]] | i <- [0..n-1]]
 
 ----------------------------------------------------------------------
--- Full GPT backward pass
+-- Full GPT backward
 ----------------------------------------------------------------------
 
--- | Full forward + backward pass through GPT-2.
---   Returns (loss, parameter_gradients).
 gptBackward :: GptConfig -> Gpt -> [Int] -> [Int] -> (Double, GptGrads)
 gptBackward cfg model inputIds targetIds =
   let seqLen = length inputIds
-      nEmb = gptNEmbd cfg; nHead = gptNHead cfg; vocab = gptVocabSize cfg
-      maxSeq = 1024; ffMul = 4
+      nEmb = gptNEmbd cfg; nHead = gptNHead cfg; nLayer = gptNLayer cfg
+      vocab = gptVocabSize cfg; eps = 1e-5
+      blocks = gptBlocks model
 
-      -- ---- Forward pass (saving intermediates) ----
+      -- Embeddings
       wte = gptWte model; wpe = gptWpe model
+      tokEmb = fromRows [toRows wte !! i | i <- inputIds]
+      posEmb = subMatrixW wpe 0 0 seqLen nEmb
+      x0 = tokEmb + posEmb
 
-      -- Token embeddings: rows of wte indexed by inputIds
-      tokEmb = fromRows [toRows wte !! i | i <- inputIds]  -- [seq, nEmb]
-      posEmb = subMatrixW wpe 0 0 seqLen nEmb              -- [seq, nEmb]
-      x = tokEmb + posEmb                                   -- [seq, nEmb]
+      -- Forward through blocks, saving x at each stage
+      goFwd :: Matrix Double -> [TransformerBlock] -> [Matrix Double] -> [Matrix Double]
+      goFwd x [] acc = reverse (x : acc)
+      goFwd x (tb:tbs) acc =
+        let hDim = nEmb `div` nHead
+            an = layerNormF x (tbAttnLnGamma tb) (tbAttnLnBeta tb) eps
+            heads = [ let wQh = subMatrixW (tbAttnWq tb) 0 (h*hDim) nEmb hDim
+                          wKh = subMatrixW (tbAttnWk tb) 0 (h*hDim) nEmb hDim
+                          wVh = subMatrixW (tbAttnWv tb) 0 (h*hDim) nEmb hDim
+                          qh = an LA.<> wQh; kh = an LA.<> wKh; vh = an LA.<> wVh
+                          sc = scale (1 / sqrt (fromIntegral hDim)) (qh LA.<> tr kh)
+                          pr = softmaxStableF (sc + causalMaskF seqLen)
+                      in  pr LA.<> vh
+                    | h <- [0 .. nHead - 1] ]
+            ctx = concatColsF heads
+            attnOut = ctx LA.<> tbAttnWo tb
+            postAttn = x + attnOut
+            fn = layerNormF postAttn (tbFfnLnGamma tb) (tbFfnLnBeta tb) eps
+            ff = tbFfn tb
+            preGelu = fn LA.<> ffW1 ff + broadcastBias (ffB1 ff) seqLen
+            hGelu = geluF preGelu
+            ffnOut = hGelu LA.<> ffW2 ff + broadcastBias (ffB2 ff) seqLen
+            x' = postAttn + ffnOut
+        in  goFwd x' tbs (x : acc)
+      fwdStack = goFwd x0 blocks []  -- [x0, x1, ..., xn]
 
-      -- ---- Placeholder for block-by-block forward ----
-      -- For now, we compute the full forward using Circuit.LLM.GPT.forward
-      -- and then use a simplified backward that handles the output projection
-      -- and final layer norm, with block-level gradients stubbed.
+      -- Last output
+      xN = head fwdStack  -- post-block output
+      xPre = fwdStack !! 1  -- input to last block
 
-      -- Full forward pass (existing implementation)
-      logits = forward cfg model inputIds  -- [seq, vocab]
+      -- Final norm + output projection
+      xFinal = case blocks of
+        [] -> x0
+        _  -> let lastTb = last blocks
+                  hDim = nEmb `div` nHead
+                  an = layerNormF xPre (tbAttnLnGamma lastTb) (tbAttnLnBeta lastTb) eps
+                  heads = [ let wQh = subMatrixW (tbAttnWq lastTb) 0 (h*hDim) nEmb hDim
+                                wKh = subMatrixW (tbAttnWk lastTb) 0 (h*hDim) nEmb hDim
+                                wVh = subMatrixW (tbAttnWv lastTb) 0 (h*hDim) nEmb hDim
+                                qh = an LA.<> wQh; kh = an LA.<> wKh; vh = an LA.<> wVh
+                                sc = scale (1 / sqrt (fromIntegral hDim)) (qh LA.<> tr kh)
+                                pr = softmaxStableF (sc + causalMaskF seqLen)
+                            in  pr LA.<> vh
+                          | h <- [0 .. nHead - 1] ]
+                  ctx = concatColsF heads
+                  attnOut = ctx LA.<> tbAttnWo lastTb
+                  postAttn = xPre + attnOut
+                  fn = layerNormF postAttn (tbFfnLnGamma lastTb) (tbFfnLnBeta lastTb) eps
+                  ff = tbFfn lastTb
+                  preGelu2 = fn LA.<> ffW1 ff + broadcastBias (ffB1 ff) seqLen
+                  hGelu2 = geluF preGelu2
+                  ffnOut2 = hGelu2 LA.<> ffW2 ff + broadcastBias (ffB2 ff) seqLen
+              in  postAttn + ffnOut2
 
-      -- ---- Backward pass ----
+      xFinalNorm = layerNormF xFinal (gptLnGamma model) (gptLnBeta model) eps
+      logits = xFinalNorm LA.<> gptHead model + broadcastBias (gptHeadB model) seqLen
+
+      -- Loss
       (loss, gradLogits) = crossEntropyBwd logits targetIds
 
-      -- gradLogits -> grad through output projection (gptHead, gptHeadB)
-      (gradPreHead, gHead, gHeadB) = linearBwd x (gptHead model) gradLogits
-      -- Note: x here should be the pre-head activations from the last transformer block
-      -- For the simplified stub, we propagate back directly
+      -- Backward: output projection
+      (gradXFinalNorm, gHead, gHeadB) = linearBwd xFinalNorm (gptHead model) gradLogits
+      (gradXFinal', gLnfGamma, gLnfBeta) = layerNormBwd xFinal (gptLnGamma model) (gptLnBeta model) eps gradXFinalNorm
 
-      -- Accumulate gradients
+      -- Backward through blocks (in reverse)
+      -- We have fwdStack = [xN, x_{n-1}, ..., x0] where xN is post-block, x_{n-1} is input to last block
+      -- gradXFinal' is gradient w.r.t. xN
+      goBwd :: Matrix Double -> [TransformerBlock] -> [Matrix Double] -> (Matrix Double, [BlockGrads])
+      goBwd gradX [] _ = (gradX, [])
+      goBwd gradX (tb:tbs) (xPrev:xs) =
+        let (gradInput, blockGrad) = blockBackward nHead seqLen eps tb xPrev gradX
+            (gradFinal, restGrads) = goBwd gradInput tbs xs
+        in  (gradFinal, blockGrad : restGrads)
+      goBwd gradX _ _ = (gradX, [])  -- shouldn't happen
+
+      (gradEmbed, blockGradsRev) = goBwd gradXFinal' (reverse blocks) (init fwdStack)
+      blockGrads = reverse blockGradsRev
+
+      -- Embedding gradients
+      gWte = embedBackward wte inputIds gradEmbed
+      gWpeFull = zeroMatrix 1024 nEmb
+      gWpe' = updateSubMatrix gWpeFull 0 0 gradEmbed
+
       grads = (zeroGptGrads cfg)
-        { ggHead = gHead
-        , ggHeadB = gHeadB
+        { ggWte = gWte, ggWpe = gWpe'
+        , ggBlocks = blockGrads
+        , ggLnGamma = gLnfGamma, ggLnBeta = gLnfBeta
+        , ggHead = gHead, ggHeadB = gHeadB
         }
-
   in  (loss, grads)
+  where
+    causalMaskF n = fromLists [[if j <= i then 0 else -1/0 | j <- [0..n-1]] | i <- [0..n-1]]
 
--- Helper: subMatrix wrapper
+----------------------------------------------------------------------
+-- Forward helpers
+----------------------------------------------------------------------
+
+layerNormF :: Matrix Double -> Vector Double -> Vector Double -> Double -> Matrix Double
+layerNormF x gamma beta eps =
+  let d = fromIntegral (cols x)
+      mu = LA.fromList [sumElements row / d | row <- toRows x]
+      xm = x - LA.asColumn mu
+      var = LA.fromList [sumElements (row * row) / d | row <- toRows xm]
+      invStd = cmap (\v -> 1 / sqrt (v + eps)) var
+      xHat = fromRows $ zipWith (\xi s -> scale s xi) (toRows xm) (toList invStd)
+  in  fromRows (zipWith (\xh g -> scale g xh) (toRows xHat) (toList gamma))
+    + broadcastBias beta (rows x)
+
+geluF :: Matrix Double -> Matrix Double
+geluF x = cmap f x
+  where f v = let z = 1.59577 * v * (1 + 0.044715 * v * v) in v / (1 + exp (-z))
+
+concatColsF :: [Matrix Double] -> Matrix Double
+concatColsF [a] = a
+concatColsF (a:as) = a ||| concatColsF as
+concatColsF [] = error "no heads"
+
+broadcastBias :: Vector Double -> Int -> Matrix Double
+broadcastBias b n = reshape (LA.size b) (fromList (concat (replicate n (toList b))))
+
+zeroMatrix :: Int -> Int -> Matrix Double
+zeroMatrix r c = reshape c (fromList (replicate (r * c) 0))
+
+----------------------------------------------------------------------
+-- Utilities
+----------------------------------------------------------------------
+
 subMatrixW :: Matrix Double -> Int -> Int -> Int -> Int -> Matrix Double
 subMatrixW m r c rows' cols' = LA.subMatrix (r, c) (rows', cols') m
+
+accumulateCols :: Matrix Double -> [(Int, Matrix Double)] -> Matrix Double
+accumulateCols template patches =
+  let full = zeroMatrix (rows template) (cols template)
+  in  foldl' (\acc (offset, patch) ->
+        reshape (cols acc) (fromList
+          [ if c >= offset && c < offset + cols patch
+            then (toList (LA.flatten acc) !! (r * cols acc + c)) +
+                 (toList (LA.flatten patch) !! (r * cols patch + (c - offset)))
+            else toList (LA.flatten acc) !! (r * cols acc + c)
+          | r <- [0 .. rows acc - 1], c <- [0 .. cols acc - 1]
+          ])
+        ) full patches
+
+embedBackward :: Matrix Double -> [Int] -> Matrix Double -> Matrix Double
+embedBackward wte inputIds gradX =
+  let rowsGradX = toRows gradX
+      updateFn acc (i, tid) =
+        let oldRow = toRows acc !! tid
+            newRow = oldRow + (rowsGradX !! i)
+            vals = [ if ri == tid then toList newRow !! ci
+                     else toList (LA.flatten acc) !! (ri * cols acc + ci)
+                   | ri <- [0 .. rows acc - 1], ci <- [0 .. cols acc - 1] ]
+        in  reshape (cols acc) (fromList vals)
+  in  foldl' updateFn (zeroMatrix (rows wte) (cols wte)) (zip [0..] inputIds)
+
+updateSubMatrix :: Matrix Double -> Int -> Int -> Matrix Double -> Matrix Double
+updateSubMatrix target r0 c0 patch =
+  reshape (cols target) (fromList
+    [ if ri >= r0 && ri < r0 + rows patch && ci >= c0 && ci < c0 + cols patch
+      then toList (LA.flatten patch) !! ((ri - r0) * cols patch + (ci - c0))
+      else toList (LA.flatten target) !! (ri * cols target + ci)
+    | ri <- [0 .. rows target - 1], ci <- [0 .. cols target - 1] ])

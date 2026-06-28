@@ -98,6 +98,16 @@ executable debug-attn
   default-language: GHC2024
   ghc-options: -O2
 
+executable test-backprop-full
+  main-is: test-backprop-full.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits-llm,
+    hmatrix
+  default-language: GHC2024
+  ghc-options: -O2 -rtsopts
+
 executable test-backprop
   main-is: test-backprop.hs
   hs-source-dirs: app
