@@ -5,6 +5,7 @@
 module Circuit.LLM.Backprop
   ( -- * Full backward pass
     gptBackward
+  , bertBackward
 
     -- * Gradient types
   , GptGrads (..)
@@ -19,15 +20,17 @@ module Circuit.LLM.Backprop
   , geluBwd
   , softmaxBwd
   , crossEntropyBwd
+  , maskedCrossEntropyBwd
   ) where
 
-import Circuit.LLM.GPT
-  ( FeedForward (..), Gpt (..), GptConfig (..), TransformerBlock (..), forward )
-import Data.Foldable (foldl')
-import Data.List (foldl1')
+import Circuit.LLM.Diff
+  ( DiffP (..), GptParams (..), BlockParams (..)
+  , gptDiffP, bertDiffP, gptParamsFromModel, subMatrixW, zeroMatrix
+  )
+import Circuit.LLM.GPT (Gpt (..), GptConfig (..))
 import Numeric.LinearAlgebra
-  ( Matrix, Vector, cmap, fromList, fromLists, fromRows, maxElement, reshape
-  , rows, cols, scale, sumElements, toList, toRows, tr, (|||)
+  ( Matrix, Vector, cmap, fromList, fromRows, maxElement, reshape
+  , rows, cols, scale, sumElements, toList, toRows, tr
   )
 import qualified Numeric.LinearAlgebra as LA
 
@@ -105,13 +108,13 @@ scaleGptGrads s g = GptGrads
   , ggLnGamma = scale s (ggLnGamma g), ggLnBeta = scale s (ggLnBeta g)
   , ggHead = scale s (ggHead g), ggHeadB = scale s (ggHeadB g)
   }
-  where scaleBG s b = BlockGrads
-          { bgAttnWq = scale s (bgAttnWq b), bgAttnWk = scale s (bgAttnWk b)
-          , bgAttnWv = scale s (bgAttnWv b), bgAttnWo = scale s (bgAttnWo b)
-          , bgAttnLnGamma = scale s (bgAttnLnGamma b), bgAttnLnBeta = scale s (bgAttnLnBeta b)
-          , bgFfnW1 = scale s (bgFfnW1 b), bgFfnB1 = scale s (bgFfnB1 b)
-          , bgFfnW2 = scale s (bgFfnW2 b), bgFfnB2 = scale s (bgFfnB2 b)
-          , bgFfnLnGamma = scale s (bgFfnLnGamma b), bgFfnLnBeta = scale s (bgFfnLnBeta b)
+  where scaleBG s_ b = BlockGrads
+          { bgAttnWq = scale s_ (bgAttnWq b), bgAttnWk = scale s_ (bgAttnWk b)
+          , bgAttnWv = scale s_ (bgAttnWv b), bgAttnWo = scale s_ (bgAttnWo b)
+          , bgAttnLnGamma = scale s_ (bgAttnLnGamma b), bgAttnLnBeta = scale s_ (bgAttnLnBeta b)
+          , bgFfnW1 = scale s_ (bgFfnW1 b), bgFfnB1 = scale s_ (bgFfnB1 b)
+          , bgFfnW2 = scale s_ (bgFfnW2 b), bgFfnB2 = scale s_ (bgFfnB2 b)
+          , bgFfnLnGamma = scale s_ (bgFfnLnGamma b), bgFfnLnBeta = scale s_ (bgFfnLnBeta b)
           }
 
 ----------------------------------------------------------------------
@@ -141,34 +144,34 @@ softmaxBwd probs gradOut =
   fromRows $ zipWith softmaxRowBwd (toRows probs) (toRows gradOut)
   where softmaxRowBwd p go =
           let pv = toList p; gov = toList go; dot = sum (zipWith (*) pv gov)
-          in  fromList $ zipWith (\pi goi -> pi * (goi - dot)) pv gov
+          in  fromList $ zipWith (\pi_ goi -> pi_ * (goi - dot)) pv gov
 
 layerNormBwd ::
   Matrix Double -> Vector Double -> Vector Double -> Double -> Matrix Double
   -> (Matrix Double, Vector Double, Vector Double)
-layerNormBwd x gamma beta eps gradY =
-  let d = fromIntegral (cols x)
-      mu = LA.fromList [sumElements row / d | row <- toRows x]
+layerNormBwd x gamma _beta eps gradY =
+  let mu = LA.fromList [sumElements row / d | row <- toRows x]
       xm = x - LA.asColumn mu
       var = LA.fromList [sumElements (row * row) / d | row <- toRows xm]
       invStd = cmap (\v -> 1 / sqrt (v + eps)) var
       xHat = fromRows $ zipWith (\xi s -> scale s xi) (toRows xm) (toList invStd)
-      gradXHat = fromRows $ zipWith (\go g -> scale g go) (toRows gradY) (toList gamma)
-      gGamma = fromList [sumElements (go * xh) | (go, xh) <- zip (toRows gradY) (toRows xHat)]
-      gBeta  = fromList [sumElements go | go <- toRows gradY]
-      features = cols x
+      gammaList = toList gamma
+      gradXHat = fromRows [ LA.fromList $ zipWith (*) (toList go) gammaList | go <- toRows gradY ]
+      gGamma = fromList [sumElements (go * xh) | (go, xh) <- zip (LA.toColumns gradY) (LA.toColumns xHat)]
+      gBeta  = fromList [sumElements go | go <- LA.toColumns gradY]
       gradX = fromRows [ gradRow (toRows gradXHat !! i) (toRows xm !! i)
                                    (toList invStd !! i) (toList var !! i)
                        | i <- [0 .. rows x - 1] ]
   in  (gradX, gGamma, gBeta)
   where
+    d = fromIntegral (cols x)
+    features = cols x
     gradRow gxh xi_minus_mu is v =
       let gInvStd = sumElements (gxh * xi_minus_mu)
           gVar = gInvStd * (-0.5) * (v + eps) ** (-1.5)
           gXm = scale is gxh + scale (2 * gVar / d) xi_minus_mu
           gMu = -sumElements gXm
       in  gXm + fromList (replicate features (gMu / d))
-    d = fromIntegral (cols x); features = cols x
 
 crossEntropyBwd :: Matrix Double -> [Int] -> (Double, Matrix Double)
 crossEntropyBwd logits targetIds =
@@ -184,290 +187,131 @@ crossEntropyBwd logits targetIds =
   where softmaxStable v = let mx = maxElement v; shifted = cmap (\x -> exp (x - mx)) v
                           in  scale (1 / sumElements shifted) shifted
 
-----------------------------------------------------------------------
--- Multi-head attention backward (per-head, summed)
-----------------------------------------------------------------------
+-- | Masked cross-entropy for BERT-style training.
+--   The mask indicates which positions are supervised; loss and gradients are
+--   averaged only over those positions.
+maskedCrossEntropyBwd :: Matrix Double -> [Int] -> [Bool] -> (Double, Matrix Double)
+maskedCrossEntropyBwd logits targetIds mask =
+  let maskedCount = fromIntegral (length (filter id mask))
+      vocab = cols logits
+      softmaxRows = map softmaxStable (toRows logits)
+      maskedLosses = zipWith3 (\p t m ->
+        if m then -log (max (toList p !! t) 1e-12) else 0) softmaxRows targetIds mask
+      totalLoss = if maskedCount == 0 then 0 else sum maskedLosses / maskedCount
+      gradRows = zipWith (\p (t, m) ->
+        if m
+          then let pv = toList p
+               in  fromList [if i == t then pv !! i - 1 else pv !! i | i <- [0 .. length pv - 1]]
+          else fromList (replicate vocab 0)
+        ) softmaxRows (zip targetIds mask)
+  in  if maskedCount == 0
+        then (0, zeroMatrix (rows logits) (cols logits))
+        else (totalLoss, scale (1 / maskedCount) (fromRows gradRows))
+  where softmaxStable v = let mx = maxElement v; shifted = cmap (\x -> exp (x - mx)) v
+                          in  scale (1 / sumElements shifted) shifted
 
--- | Backward through one head: x -> QKV -> scores -> softmax -> context.
---   gradOut is dL/d(context). Returns (grad_x, grad_Wq, grad_Wk, grad_Wv).
-attentionHeadBwd :: Matrix Double -> Matrix Double -> Matrix Double -> Matrix Double
-                 -> Matrix Double
-                 -> (Matrix Double, Matrix Double, Matrix Double, Matrix Double)
-attentionHeadBwd x wQ wK wV gradOut =
-  let dk = fromIntegral (cols wQ) :: Double
-      q = x LA.<> wQ; k = x LA.<> wK; v = x LA.<> wV
-      scores = scale (1 / sqrt dk) (q LA.<> tr k)
-      probs = softmaxStableF scores
-      -- Backward through context = probs @ V
-      gradProbs = gradOut LA.<> tr v
-      gradV = tr probs LA.<> gradOut
-      -- Backward through softmax
-      gradScores = softmaxBwd probs gradProbs
-      gradScoresS = scale (1 / sqrt dk) gradScores
-      -- Backward through scores = Q @ K^T
-      gradQ = gradScoresS LA.<> k
-      gradK = tr gradScoresS LA.<> q
-      -- Backward through projections
-      (gradXq, gWQ, _) = linearBwd x wQ gradQ
-      (gradXk, gWK, _) = linearBwd x wK gradK
-      (gradXv, gWV, _) = linearBwd x wV gradV
-      gradX = gradXq + gradXk + gradXv
-  in  (gradX, gWQ, gWK, gWV)
-
-softmaxStableF :: Matrix Double -> Matrix Double
-softmaxStableF m = fromRows
-  [let mx = maxElement row; s = cmap (\x -> exp (x - mx)) row
-   in  scale (1 / sumElements s) s | row <- toRows m]
-
-----------------------------------------------------------------------
--- Block backward
-----------------------------------------------------------------------
-
--- | Backward through one transformer block.
---   Given gradient w.r.t. block output, returns (grad_wrt_input, BlockGrads).
-blockBackward ::
-  Int -> Int -> Double -> TransformerBlock -> Matrix Double -> Matrix Double
-  -> (Matrix Double, BlockGrads)
-blockBackward nHead seqLen eps tb xIn gradOut =
-  let hDim = cols (tbAttnWq tb) `div` nHead
-
-      -- ---- Forward pass (recompute intermediates from xIn) ----
-      -- LN1
-      an = layerNormF xIn (tbAttnLnGamma tb) (tbAttnLnBeta tb) eps
-      -- Per-head attention
-      headFwd h =
-        let wQh = subMatrixW (tbAttnWq tb) 0 (h * hDim) (rows (tbAttnWq tb)) hDim
-            wKh = subMatrixW (tbAttnWk tb) 0 (h * hDim) (rows (tbAttnWk tb)) hDim
-            wVh = subMatrixW (tbAttnWv tb) 0 (h * hDim) (rows (tbAttnWv tb)) hDim
-            qh = an LA.<> wQh; kh = an LA.<> wKh; vh = an LA.<> wVh
-            sc = scale (1 / sqrt (fromIntegral hDim :: Double)) (qh LA.<> tr kh)
-            scm = sc + causalMaskF seqLen
-            pr = softmaxStableF scm
-        in  pr LA.<> vh
-      headOuts = map headFwd [0 .. nHead - 1]
-      ctx = concatColsF headOuts
-      attnOut = ctx LA.<> tbAttnWo tb
-      postAttn = xIn + attnOut
-      -- LN2
-      fn = layerNormF postAttn (tbFfnLnGamma tb) (tbFfnLnBeta tb) eps
-      -- FFN
-      ff = tbFfn tb
-      preGelu = fn LA.<> ffW1 ff + broadcastBias (ffB1 ff) seqLen
-      hGelu = geluF preGelu
-      ffnOut = hGelu LA.<> ffW2 ff + broadcastBias (ffB2 ff) seqLen
-      xOut = postAttn + ffnOut
-
-      -- ---- Backward pass ----
-      -- gradOut = dL/d(xOut)
-      -- Residual 2 splits gradient
-      gradPostAttn2 = gradOut  -- flows to postAttn
-      gradFfnOut = gradOut      -- flows to ffnOut
-
-      -- FFN backward
-      (gradH, gW2, gB2) = linearBwd hGelu (ffW2 ff) gradFfnOut
-      gradPreGelu = geluBwd preGelu gradH
-      (gradFn, gW1, gB1) = linearBwd fn (ffW1 ff) gradPreGelu
-      (gradPostAttn1, gFfnLnGamma, gFfnLnBeta) = layerNormBwd postAttn (tbFfnLnGamma tb) (tbFfnLnBeta tb) eps gradFn
-
-      -- Combine FFN + residual gradients into postAttn
-      gradPostAttn = gradPostAttn2 + gradPostAttn1
-
-      -- Residual 1 splits: to xIn and to attnOut
-      gradXfromRes1 = gradPostAttn
-      gradAttnOut = gradPostAttn
-
-      -- Attention output projection
-      (gradCtx, gWo, _) = linearBwd ctx (tbAttnWo tb) gradAttnOut
-
-      -- Per-head backward
-      headBwd h =
-        let goh = subMatrixW gradCtx 0 (h * hDim) seqLen hDim
-            wQh = subMatrixW (tbAttnWq tb) 0 (h * hDim) nEmb hDim
-            wKh = subMatrixW (tbAttnWk tb) 0 (h * hDim) nEmb hDim
-            wVh = subMatrixW (tbAttnWv tb) 0 (h * hDim) nEmb hDim
-        in  attentionHeadBwd an wQh wKh wVh goh
-      headGrads = map headBwd [0 .. nHead - 1]
-      gradAn = foldl1' (+) [gx | (gx, _, _, _) <- headGrads]
-      gWqFull = accumulateCols (tbAttnWq tb) [(h * hDim, gwq) | (h, (_, gwq, _, _)) <- zip [0..] headGrads]
-      gWkFull = accumulateCols (tbAttnWk tb) [(h * hDim, gwk) | (h, (_, _, gwk, _)) <- zip [0..] headGrads]
-      gWvFull = accumulateCols (tbAttnWv tb) [(h * hDim, gwv) | (h, (_, _, _, gwv)) <- zip [0..] headGrads]
-
-      -- LN1 backward
-      (gradXfromAttn, gAttnLnGamma, gAttnLnBeta) = layerNormBwd xIn (tbAttnLnGamma tb) (tbAttnLnBeta tb) eps gradAn
-
-      -- Total grad w.r.t. xIn
-      gradX = gradXfromRes1 + gradXfromAttn
-
-      blockGrad = BlockGrads
-        { bgAttnWq = gWqFull, bgAttnWk = gWkFull, bgAttnWv = gWvFull, bgAttnWo = gWo
-        , bgAttnLnGamma = gAttnLnGamma, bgAttnLnBeta = gAttnLnBeta
-        , bgFfnW1 = gW1, bgFfnB1 = gB1, bgFfnW2 = gW2, bgFfnB2 = gB2
-        , bgFfnLnGamma = gFfnLnGamma, bgFfnLnBeta = gFfnLnBeta
-        }
-  in  (gradX, blockGrad)
-  where
-    nEmb = cols (tbAttnWq tb)
-    causalMaskF n = fromLists [[if j <= i then 0 else -1/0 | j <- [0..n-1]] | i <- [0..n-1]]
+-- | Convert a flat 'BlockParams' (used as the parameter/gradient carrier in
+--   'DiffP') back to the existing 'BlockGrads' record.
+blockGradsFromParams :: BlockParams -> BlockGrads
+blockGradsFromParams bp = BlockGrads
+  { bgAttnWq = bpAttnWq bp, bgAttnWk = bpAttnWk bp
+  , bgAttnWv = bpAttnWv bp, bgAttnWo = bpAttnWo bp
+  , bgAttnLnGamma = bpAttnLnGamma bp, bgAttnLnBeta = bpAttnLnBeta bp
+  , bgFfnW1 = bpFfnW1 bp, bgFfnB1 = bpFfnB1 bp
+  , bgFfnW2 = bpFfnW2 bp, bgFfnB2 = bpFfnB2 bp
+  , bgFfnLnGamma = bpFfnLnGamma bp, bgFfnLnBeta = bpFfnLnBeta bp
+  }
 
 ----------------------------------------------------------------------
--- Full GPT backward
+-- Full model backward passes
 ----------------------------------------------------------------------
 
-gptBackward :: GptConfig -> Gpt -> [Int] -> [Int] -> (Double, GptGrads)
-gptBackward cfg model inputIds targetIds =
+-- | Shared embedding setup used by both GPT and BERT backward passes.
+embedInput :: GptConfig -> Gpt -> [Int] -> (Matrix Double, Matrix Double, Matrix Double)
+embedInput cfg model inputIds =
   let seqLen = length inputIds
-      nEmb = gptNEmbd cfg; nHead = gptNHead cfg; nLayer = gptNLayer cfg
-      vocab = gptVocabSize cfg; eps = 1e-5
-      blocks = gptBlocks model
-
-      -- Embeddings
+      nEmb = gptNEmbd cfg
       wte = gptWte model; wpe = gptWpe model
       tokEmb = fromRows [toRows wte !! i | i <- inputIds]
       posEmb = subMatrixW wpe 0 0 seqLen nEmb
       x0 = tokEmb + posEmb
+  in  (x0, wte, wpe)
 
-      -- Forward through blocks, saving x at each stage
-      goFwd :: Matrix Double -> [TransformerBlock] -> [Matrix Double] -> [Matrix Double]
-      goFwd x [] acc = reverse (x : acc)
-      goFwd x (tb:tbs) acc =
-        let hDim = nEmb `div` nHead
-            an = layerNormF x (tbAttnLnGamma tb) (tbAttnLnBeta tb) eps
-            heads = [ let wQh = subMatrixW (tbAttnWq tb) 0 (h*hDim) nEmb hDim
-                          wKh = subMatrixW (tbAttnWk tb) 0 (h*hDim) nEmb hDim
-                          wVh = subMatrixW (tbAttnWv tb) 0 (h*hDim) nEmb hDim
-                          qh = an LA.<> wQh; kh = an LA.<> wKh; vh = an LA.<> wVh
-                          sc = scale (1 / sqrt (fromIntegral hDim)) (qh LA.<> tr kh)
-                          pr = softmaxStableF (sc + causalMaskF seqLen)
-                      in  pr LA.<> vh
-                    | h <- [0 .. nHead - 1] ]
-            ctx = concatColsF heads
-            attnOut = ctx LA.<> tbAttnWo tb
-            postAttn = x + attnOut
-            fn = layerNormF postAttn (tbFfnLnGamma tb) (tbFfnLnBeta tb) eps
-            ff = tbFfn tb
-            preGelu = fn LA.<> ffW1 ff + broadcastBias (ffB1 ff) seqLen
-            hGelu = geluF preGelu
-            ffnOut = hGelu LA.<> ffW2 ff + broadcastBias (ffB2 ff) seqLen
-            x' = postAttn + ffnOut
-        in  goFwd x' tbs (x : acc)
-      fwdStack = goFwd x0 blocks []  -- [x0, x1, ..., xn]
+gptBackward :: GptConfig -> Gpt -> [Int] -> [Int] -> (Double, GptGrads)
+gptBackward cfg model inputIds targetIds =
+  let seqLen = length inputIds
+      nEmb = gptNEmbd cfg
+      eps = 1e-5
 
-      -- Last output
-      xN = head fwdStack  -- post-block output
-      xPre = fwdStack !! 1  -- input to last block
+      (x0, wte, _) = embedInput cfg model inputIds
 
-      -- Final norm + output projection
-      xFinal = case blocks of
-        [] -> x0
-        _  -> let lastTb = last blocks
-                  hDim = nEmb `div` nHead
-                  an = layerNormF xPre (tbAttnLnGamma lastTb) (tbAttnLnBeta lastTb) eps
-                  heads = [ let wQh = subMatrixW (tbAttnWq lastTb) 0 (h*hDim) nEmb hDim
-                                wKh = subMatrixW (tbAttnWk lastTb) 0 (h*hDim) nEmb hDim
-                                wVh = subMatrixW (tbAttnWv lastTb) 0 (h*hDim) nEmb hDim
-                                qh = an LA.<> wQh; kh = an LA.<> wKh; vh = an LA.<> wVh
-                                sc = scale (1 / sqrt (fromIntegral hDim)) (qh LA.<> tr kh)
-                                pr = softmaxStableF (sc + causalMaskF seqLen)
-                            in  pr LA.<> vh
-                          | h <- [0 .. nHead - 1] ]
-                  ctx = concatColsF heads
-                  attnOut = ctx LA.<> tbAttnWo lastTb
-                  postAttn = xPre + attnOut
-                  fn = layerNormF postAttn (tbFfnLnGamma lastTb) (tbFfnLnBeta lastTb) eps
-                  ff = tbFfn lastTb
-                  preGelu2 = fn LA.<> ffW1 ff + broadcastBias (ffB1 ff) seqLen
-                  hGelu2 = geluF preGelu2
-                  ffnOut2 = hGelu2 LA.<> ffW2 ff + broadcastBias (ffB2 ff) seqLen
-              in  postAttn + ffnOut2
+      -- Run the differentiable GPT body
+      gptP = gptDiffP cfg seqLen eps
+      params = gptParamsFromModel model
+      logits = forwardP gptP params x0
 
-      xFinalNorm = layerNormF xFinal (gptLnGamma model) (gptLnBeta model) eps
-      logits = xFinalNorm LA.<> gptHead model + broadcastBias (gptHeadB model) seqLen
-
-      -- Loss
+      -- Loss and output gradient
       (loss, gradLogits) = crossEntropyBwd logits targetIds
 
-      -- Backward: output projection
-      (gradXFinalNorm, gHead, gHeadB) = linearBwd xFinalNorm (gptHead model) gradLogits
-      (gradXFinal', gLnfGamma, gLnfBeta) = layerNormBwd xFinal (gptLnGamma model) (gptLnBeta model) eps gradXFinalNorm
-
-      -- Backward through blocks (in reverse)
-      -- We have fwdStack = [xN, x_{n-1}, ..., x0] where xN is post-block, x_{n-1} is input to last block
-      -- gradXFinal' is gradient w.r.t. xN
-      goBwd :: Matrix Double -> [TransformerBlock] -> [Matrix Double] -> (Matrix Double, [BlockGrads])
-      goBwd gradX [] _ = (gradX, [])
-      goBwd gradX (tb:tbs) (xPrev:xs) =
-        let (gradInput, blockGrad) = blockBackward nHead seqLen eps tb xPrev gradX
-            (gradFinal, restGrads) = goBwd gradInput tbs xs
-        in  (gradFinal, blockGrad : restGrads)
-      goBwd gradX _ _ = (gradX, [])  -- shouldn't happen
-
-      (gradEmbed, blockGradsRev) = goBwd gradXFinal' (reverse blocks) (init fwdStack)
-      blockGrads = reverse blockGradsRev
+      -- Backward through the whole GPT body
+      (gradX0, gp) = backwardP gptP params x0 gradLogits
 
       -- Embedding gradients
-      gWte = embedBackward wte inputIds gradEmbed
+      gWte = embedBackward wte inputIds gradX0
       gWpeFull = zeroMatrix 1024 nEmb
-      gWpe' = updateSubMatrix gWpeFull 0 0 gradEmbed
+      gWpe' = updateSubMatrix gWpeFull 0 0 gradX0
 
       grads = (zeroGptGrads cfg)
         { ggWte = gWte, ggWpe = gWpe'
-        , ggBlocks = blockGrads
-        , ggLnGamma = gLnfGamma, ggLnBeta = gLnfBeta
-        , ggHead = gHead, ggHeadB = gHeadB
+        , ggBlocks = map blockGradsFromParams (gpBlocks gp)
+        , ggLnGamma = gpLnGamma gp, ggLnBeta = gpLnBeta gp
+        , ggHead = gpHead gp, ggHeadB = gpHeadB gp
         }
   in  (loss, grads)
-  where
-    causalMaskF n = fromLists [[if j <= i then 0 else -1/0 | j <- [0..n-1]] | i <- [0..n-1]]
 
-----------------------------------------------------------------------
--- Forward helpers
-----------------------------------------------------------------------
+-- | BERT-style masked-language-model backward pass.
+--
+--   * inputIds are the (possibly masked) token IDs fed to the model.
+--   * targetIds are the original token IDs to reconstruct.
+--   * mask indicates which positions are supervised.
+--
+-- The model uses bidirectional attention, so every position can attend to
+-- every other position.
+bertBackward :: GptConfig -> Gpt -> [Int] -> [Int] -> [Bool] -> (Double, GptGrads)
+bertBackward cfg model inputIds targetIds mask =
+  let seqLen = length inputIds
+      nEmb = gptNEmbd cfg
+      eps = 1e-5
 
-layerNormF :: Matrix Double -> Vector Double -> Vector Double -> Double -> Matrix Double
-layerNormF x gamma beta eps =
-  let d = fromIntegral (cols x)
-      mu = LA.fromList [sumElements row / d | row <- toRows x]
-      xm = x - LA.asColumn mu
-      var = LA.fromList [sumElements (row * row) / d | row <- toRows xm]
-      invStd = cmap (\v -> 1 / sqrt (v + eps)) var
-      xHat = fromRows $ zipWith (\xi s -> scale s xi) (toRows xm) (toList invStd)
-  in  fromRows (zipWith (\xh g -> scale g xh) (toRows xHat) (toList gamma))
-    + broadcastBias beta (rows x)
+      (x0, wte, _) = embedInput cfg model inputIds
 
-geluF :: Matrix Double -> Matrix Double
-geluF x = cmap f x
-  where f v = let z = 1.59577 * v * (1 + 0.044715 * v * v) in v / (1 + exp (-z))
+      -- Run the differentiable bidirectional body
+      bertP = bertDiffP cfg seqLen eps
+      params = gptParamsFromModel model
+      logits = forwardP bertP params x0
 
-concatColsF :: [Matrix Double] -> Matrix Double
-concatColsF [a] = a
-concatColsF (a:as) = a ||| concatColsF as
-concatColsF [] = error "no heads"
+      -- Masked loss and output gradient
+      (loss, gradLogits) = maskedCrossEntropyBwd logits targetIds mask
 
-broadcastBias :: Vector Double -> Int -> Matrix Double
-broadcastBias b n = reshape (LA.size b) (fromList (concat (replicate n (toList b))))
+      -- Backward through the whole BERT body
+      (gradX0, gp) = backwardP bertP params x0 gradLogits
 
-zeroMatrix :: Int -> Int -> Matrix Double
-zeroMatrix r c = reshape c (fromList (replicate (r * c) 0))
+      -- Embedding gradients
+      gWte = embedBackward wte inputIds gradX0
+      gWpeFull = zeroMatrix 1024 nEmb
+      gWpe' = updateSubMatrix gWpeFull 0 0 gradX0
+
+      grads = (zeroGptGrads cfg)
+        { ggWte = gWte, ggWpe = gWpe'
+        , ggBlocks = map blockGradsFromParams (gpBlocks gp)
+        , ggLnGamma = gpLnGamma gp, ggLnBeta = gpLnBeta gp
+        , ggHead = gpHead gp, ggHeadB = gpHeadB gp
+        }
+  in  (loss, grads)
 
 ----------------------------------------------------------------------
 -- Utilities
 ----------------------------------------------------------------------
-
-subMatrixW :: Matrix Double -> Int -> Int -> Int -> Int -> Matrix Double
-subMatrixW m r c rows' cols' = LA.subMatrix (r, c) (rows', cols') m
-
-accumulateCols :: Matrix Double -> [(Int, Matrix Double)] -> Matrix Double
-accumulateCols template patches =
-  let full = zeroMatrix (rows template) (cols template)
-  in  foldl' (\acc (offset, patch) ->
-        reshape (cols acc) (fromList
-          [ if c >= offset && c < offset + cols patch
-            then (toList (LA.flatten acc) !! (r * cols acc + c)) +
-                 (toList (LA.flatten patch) !! (r * cols patch + (c - offset)))
-            else toList (LA.flatten acc) !! (r * cols acc + c)
-          | r <- [0 .. rows acc - 1], c <- [0 .. cols acc - 1]
-          ])
-        ) full patches
 
 embedBackward :: Matrix Double -> [Int] -> Matrix Double -> Matrix Double
 embedBackward wte inputIds gradX =

@@ -18,6 +18,9 @@ library
     Circuit.LLM.Training
     Circuit.LLM.Backprop
 
+  other-modules:
+    Circuit.LLM.Diff
+
   build-depends:
     base >=4.20 && <5,
     bytestring,
@@ -120,6 +123,16 @@ executable test-backprop
 
 executable test-training-full
   main-is: test-training-full.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits-llm,
+    hmatrix
+  default-language: GHC2024
+  ghc-options: -O2 -rtsopts
+
+executable test-bert
+  main-is: test-bert.hs
   hs-source-dirs: app
   build-depends:
     base >=4.20 && <5,

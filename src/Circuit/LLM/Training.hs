@@ -10,11 +10,18 @@ module Circuit.LLM.Training
     -- * Training
   , trainStep
   , trainLoop
+  , crossEntropyLoss
+
+    -- * Masked LM (BERT-style)
+  , trainStepMasked
+  , trainLoopMasked
+  , maskPositions
+  , applyMask
   ) where
 
 import Circuit.LLM.Backprop
-  ( BlockGrads (..), GptGrads (..), gptBackward, zeroGptGrads
-  , addGptGrads, scaleGptGrads
+  ( BlockGrads (..), GptGrads (..), crossEntropyBwd, bertBackward, gptBackward
+  , zeroGptGrads, addGptGrads, scaleGptGrads
   )
 import Circuit.LLM.GPT
   ( FeedForward (..), Gpt (..), GptConfig (..), TransformerBlock (..) )
@@ -25,6 +32,7 @@ import Numeric.LinearAlgebra
   , sumElements, toList, toRows, tr
   )
 import qualified Numeric.LinearAlgebra as LA
+import System.Random (newStdGen, randomRs)
 import Text.Printf (printf)
 
 ----------------------------------------------------------------------
@@ -159,6 +167,10 @@ updateVector lr_t eps wd_lr param m_ v_ =
 -- Training loop
 ----------------------------------------------------------------------
 
+-- | Cross-entropy loss from logits and target token IDs.
+crossEntropyLoss :: Matrix Double -> [Int] -> Double
+crossEntropyLoss logits targetIds = fst (crossEntropyBwd logits targetIds)
+
 -- | One training step: forward + backward + loss, return (loss, gradients).
 trainStep :: GptConfig -> Gpt -> [Int] -> [Int] -> IO (Double, GptGrads)
 trainStep cfg model inputIds targetIds = do
@@ -184,6 +196,57 @@ trainLoop lr beta1 beta2 eps wd cfg model data_ seqLen steps =
           let inputs  = take seqLen (drop offset data_)
               targets = take seqLen (drop (offset + 1) data_)
           (loss, grads) <- trainStep cfg m inputs targets
+          let (opt', m') = adamwStep lr beta1 beta2 eps wd cfg opt m grads
+          let stepNum = steps - n + 1
+          when (stepNum `mod` 10 == 0 || stepNum == 1) $
+            printf "  step %d: loss=%.6f\n" stepNum loss
+          go m' opt' (loss : losses) (n - 1) (offset + seqLen)
+
+----------------------------------------------------------------------
+-- Masked language model training (BERT-style)
+----------------------------------------------------------------------
+
+-- | One masked-LM training step: forward + backward + masked loss.
+trainStepMasked :: GptConfig -> Gpt -> [Int] -> [Int] -> [Bool] -> IO (Double, GptGrads)
+trainStepMasked cfg model inputIds targetIds mask = do
+  let (loss, grads) = bertBackward cfg model inputIds targetIds mask
+  pure (loss, grads)
+
+-- | Randomly choose positions to mask.  At least one position is always
+--   masked so the loss is well-defined.
+maskPositions :: Int -> Double -> IO [Bool]
+maskPositions seqLen maskRate = do
+  gen <- newStdGen
+  let nMask = max 1 (floor (fromIntegral seqLen * maskRate))
+      idxs = take nMask (randomRs (0, seqLen - 1) gen)
+  pure [i `elem` idxs | i <- [0 .. seqLen - 1]]
+
+-- | Replace masked positions with a fixed mask token ID.
+applyMask :: [Int] -> [Bool] -> Int -> [Int]
+applyMask ids mask maskId = zipWith (\i m -> if m then maskId else i) ids mask
+
+-- | Masked-LM training loop with AdamW optimization.
+--
+--   * maskRate is the fraction of positions to mask per step.
+--   * maskId is the token ID used to represent the [MASK] token.
+--   * data_ is a flat list of token IDs.  We slide a window of seqLen tokens.
+--   * The targets are the original (unmasked) token IDs.
+trainLoopMasked ::
+  Double -> Double -> Double -> Double -> Double
+  -> GptConfig -> Gpt -> [Int] -> Int -> Int -> Double -> Int -> IO (Gpt, [Double])
+trainLoopMasked lr beta1 beta2 eps wd cfg model data_ seqLen steps maskRate maskId =
+  let opt0 = initAdamW cfg
+  in  go model opt0 [] steps 0
+  where
+    go m opt losses 0 _ = pure (m, reverse losses)
+    go m opt losses n offset = do
+      if offset + seqLen > length data_
+        then go m opt losses (n - 1) 0
+        else do
+          let inputs = take seqLen (drop offset data_)
+          mask <- maskPositions seqLen maskRate
+          let maskedInputs = applyMask inputs mask maskId
+          (loss, grads) <- trainStepMasked cfg m maskedInputs inputs mask
           let (opt', m') = adamwStep lr beta1 beta2 eps wd cfg opt m grads
           let stepNum = steps - n + 1
           when (stepNum `mod` 10 == 0 || stepNum == 1) $
