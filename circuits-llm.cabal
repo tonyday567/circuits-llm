@@ -16,6 +16,7 @@ library
     Circuit.LLM.Weights
     Circuit.LLM.Inference
     Circuit.LLM.Training
+    Circuit.LLM.Backprop
 
   build-depends:
     base >=4.20 && <5,
@@ -96,6 +97,16 @@ executable debug-attn
     harpie
   default-language: GHC2024
   ghc-options: -O2
+
+executable test-backprop
+  main-is: test-backprop.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits-llm,
+    hmatrix
+  default-language: GHC2024
+  ghc-options: -O2 -rtsopts
 
 executable test-training
   main-is: test-training.hs
