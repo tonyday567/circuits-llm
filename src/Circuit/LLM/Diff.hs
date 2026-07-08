@@ -49,6 +49,7 @@ module Circuit.LLM.Diff
   , zeroMatrix
   ) where
 
+import qualified Circuit.AD.Param as ADP
 import Circuit.LLM.GPT (FeedForward (..), Gpt (..), GptConfig (..), TransformerBlock (..))
 import Data.List (foldl1')
 import Numeric.LinearAlgebra
@@ -133,23 +134,12 @@ linearP = DiffP
       in  (dx, (dw, db))
   }
 
--- | GELU activation.
-geluP :: DiffP () (Matrix Double) (Matrix Double)
-geluP = DiffP
-  { forwardP = \_ x -> geluF x
-  , backwardP = \_ x dy -> (geluBwd x dy, ())
+-- | GELU activation.  Migrated to use @circuits-ad:DiffP@.
+geluP :: ADP.DiffP () (Matrix Double) (Matrix Double)
+geluP = ADP.fromPrim $ ADP.TensorPrim
+  { ADP.primForward = \_ x -> geluF x
+  , ADP.primBackward = \_ x dy -> (geluBwd x dy, ())
   }
-  where
-    geluBwd x gradY =
-      let xs = toList (LA.flatten x)
-          gs = toList (LA.flatten gradY)
-          deriv v =
-            let a = 1.59577; b = 0.044715
-                z = a * v * (1 + b * v * v)
-                phi = 1 / (1 + exp (-z))
-                phi' = phi * (1 - phi) * a * (1 + 3 * b * v * v)
-            in  phi + v * phi'
-      in  reshape (cols x) (fromList (zipWith (*) gs (map deriv xs)))
 
 -- | Row-wise softmax.
 softmaxP :: DiffP () (Matrix Double) (Matrix Double)
@@ -311,7 +301,7 @@ blockDiffP nHead seqLen eps mask = DiffP
           (dAttnNorm2, (dgFfnW2, dgFfnB2)) =
             backwardP linearP (bpFfnW2 p, bpFfnB2 p) ffnActivated dFfnRes
           (dFfnHidden, ()) =
-            backwardP geluP () ffnHidden dAttnNorm2
+            snd (ADP.runDiffP geluP () ffnHidden) dAttnNorm2
           (dAttnNorm1, (dgFfnW1, dgFfnB1)) =
             backwardP linearP (bpFfnW1 p, bpFfnB1 p) attnNorm dFfnHidden
           dAttnNorm = dFfnRes + dAttnNorm1
@@ -429,6 +419,19 @@ bertDiffP cfg seqLen eps = bodyDiffP cfg seqLen eps bertBlockDiffP
 geluF :: Matrix Double -> Matrix Double
 geluF x = cmap f x
   where f v = let z = 1.59577 * v * (1 + 0.044715 * v * v) in v / (1 + exp (-z))
+
+-- | GELU backward helper (used by the migrated 'geluP').
+geluBwd :: Matrix Double -> Matrix Double -> Matrix Double
+geluBwd x gradY =
+  let xs = toList (LA.flatten x)
+      gs = toList (LA.flatten gradY)
+      deriv v =
+        let a = 1.59577; b = 0.044715
+            z = a * v * (1 + b * v * v)
+            phi = 1 / (1 + exp (-z))
+            phi' = phi * (1 - phi) * a * (1 + 3 * b * v * v)
+        in  phi + v * phi'
+  in  reshape (cols x) (fromList (zipWith (*) gs (map deriv xs)))
 
 softmaxStableF :: Matrix Double -> Matrix Double
 softmaxStableF m = fromRows

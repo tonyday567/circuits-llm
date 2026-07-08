@@ -24,6 +24,7 @@ library
   build-depends:
     base >=4.20 && <5,
     bytestring,
+    circuits-ad,
     containers,
     deepseq,
     harpie,
@@ -78,7 +79,7 @@ executable bench
 executable test-attn
   main-is: test-attn.hs
   hs-source-dirs: app
-  build-depends: base, circuits-llm, harpie
+  build-depends: base, circuits-llm, harpie, vector
   default-language: GHC2024
   ghc-options: -O2
 executable bench-attn
@@ -176,6 +177,17 @@ executable bench-hmatrix
   hs-source-dirs: app
   build-depends:
     base >=4.20 && <5,
+    harpie,
+    hmatrix
+  default-language: GHC2024
+  ghc-options: -O2
+
+executable bench-harpie-hmatrix
+  main-is: bench-harpie-hmatrix.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    deepseq,
     harpie,
     hmatrix
   default-language: GHC2024

@@ -1,5 +1,9 @@
 packages:
   circuits-llm.cabal
   ../circuits/circuits.cabal
+  ../circuits-ad/circuits-ad.cabal
+  ../numhask/numhask.cabal
+  ../numhask-free/numhask-free.cabal
+  ../../other/ad-delcont/ad-delcont.cabal
   ../circuits-meter/circuits-meter.cabal
   ../harpie/harpie.cabal
