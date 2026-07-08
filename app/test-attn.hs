@@ -1,6 +1,7 @@
 module Main where
 
 import Circuit.LLM.Attention
+import qualified Data.Vector.Unboxed as V
 import Harpie.Array (Array, array, index, shape)
 import Text.Printf (printf)
 
@@ -43,6 +44,6 @@ main = do
       mha = multiHeadAttention nHead emb wq wk wv wo cmask
   printf "mha shape: %s %s\n"
     (show (shape mha))
-    (if shape mha == [seqLen, nEmbd] then "PASS" else "FAIL")
+    (if shape mha == V.fromList [seqLen, nEmbd] then "PASS" else "FAIL")
 
   putStrLn "\nAll tests complete."

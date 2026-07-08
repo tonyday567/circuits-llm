@@ -1,0 +1,2 @@
+packages: circuits-llm.cabal
+constraints: harpie +hmatrix

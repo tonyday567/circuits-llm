@@ -18,6 +18,7 @@ where
 
 import Data.Foldable (maximum, sum)
 import Data.List (foldl1')
+import qualified Data.Vector.Unboxed as V
 import Harpie.Array
   ( Array
   , array
@@ -45,7 +46,7 @@ softmax x =
       expandedSums = expand (\v _ -> v) rowSums (array [nCols] unitVals)
   in  zipWith (/) xShifted expandedSums
  where
-  [_, nCols] = shape x
+  [_, nCols] = V.toList (shape x)
   unitVals = replicate nCols ()
 
 -- | Scaled dot-product attention.
@@ -53,7 +54,7 @@ scaledDotProductAttention ::
   (Floating a, Ord a) =>
   Array a -> Array a -> Array a -> Array a -> Array a
 scaledDotProductAttention q k v mask =
-  let dk = fromIntegral (last (shape k)) :: Double
+  let dk = fromIntegral (last (V.toList (shape k))) :: Double
       scores = H.imap (\_ s -> s / realToFrac (sqrt dk)) (mult q (transpose k))
       masked = zipWith (+) scores mask
       attn = softmax masked
@@ -70,13 +71,13 @@ causalMask n =
 
 splitHeads :: Int -> Array a -> Array a
 splitHeads nHead x =
-  let [seqLen, nEmbd] = shape x
+  let [seqLen, nEmbd] = V.toList (shape x)
       headDim = nEmbd `div` nHead
   in  reshape [nHead, seqLen, headDim] (reshape [seqLen, nHead, headDim] x)
 
 mergeHeads :: Array a -> Array a
 mergeHeads x =
-  let [nHead, seqLen, headDim] = shape x
+  let [nHead, seqLen, headDim] = V.toList (shape x)
   in  reshape [seqLen, nHead * headDim] (reshape [seqLen, nHead, headDim] x)
 
 -- | Multi-head self-attention. Projects x directly with per-head weight slices
@@ -85,7 +86,7 @@ multiHeadAttention ::
   (Floating a, Ord a) =>
   Int -> Array a -> Array a -> Array a -> Array a -> Array a -> Array a -> Array a
 multiHeadAttention nHead x wQ wK wV wO mask =
-  let [seqLen, nEmbd] = shape x
+  let [seqLen, nEmbd] = V.toList (shape x)
       headDim = nEmbd `div` nHead
 
       -- Project per head: mult x with column slice [n_embd, head_dim] of weights
