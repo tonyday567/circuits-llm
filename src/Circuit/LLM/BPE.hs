@@ -169,7 +169,7 @@ parseSpecialTokens fp lns = do
 -- Python: idx starts at 256, increments per merge line.
 parseMergeRules :: FilePath -> [Text] -> Int -> IO (Map (Word32, Word32) (Word32, Int), Word32)
 parseMergeRules fp lns specialCount = do
-  let startIdx = 256 :: Word32  -- Python starts merge tokens at 256
+  let startIdx = 256 :: Word32 -- Python starts merge tokens at 256
       parseRule (idx, line) = case Text.words line of
         [id1Str, id2Str] -> case (reads (Text.unpack id1Str), reads (Text.unpack id2Str)) of
           ([(id1, "")], [(id2, "")]) ->
@@ -238,77 +238,82 @@ encodeBPEWithPerf model text = do
 -- Implemented manually since regex-tdfa doesn't support \p{}.
 splitByRegex :: ByteString -> Text -> [Text]
 splitByRegex _pattern = gpt2Split
- where
-  gpt2Split :: Text -> [Text]
-  gpt2Split t
-    | Text.null t = []
-    | otherwise =
-        case matchGpt2Token t of
-          Nothing -> gpt2Split (Text.drop 1 t)  -- skip unrecognized char
-          Just (tok, rest) -> tok : gpt2Split rest
+  where
+    gpt2Split :: Text -> [Text]
+    gpt2Split t
+      | Text.null t = []
+      | otherwise =
+          case matchGpt2Token t of
+            Nothing -> gpt2Split (Text.drop 1 t) -- skip unrecognized char
+            Just (tok, rest) -> tok : gpt2Split rest
 
-  -- Try each alternative in order, return first match
-  matchGpt2Token :: Text -> Maybe (Text, Text)
-  matchGpt2Token t =
-        matchContraction t
-    <|> matchOptSpaceLetters t
-    <|> matchOptSpaceDigits t
-    <|> matchOptSpacePunct t
-    <|> matchTrailingSpace t
-    <|> matchSpace t
+    -- Try each alternative in order, return first match
+    matchGpt2Token :: Text -> Maybe (Text, Text)
+    matchGpt2Token t =
+      matchContraction t
+        <|> matchOptSpaceLetters t
+        <|> matchOptSpaceDigits t
+        <|> matchOptSpacePunct t
+        <|> matchTrailingSpace t
+        <|> matchSpace t
 
-  -- Contractions: '(?:[sdmt]|ll|ve|re)
-  matchContraction t
-    | Text.take 3 t == "'ll" = Just (Text.take 3 t, Text.drop 3 t)
-    | Text.take 3 t == "'ve" = Just (Text.take 3 t, Text.drop 3 t)
-    | Text.take 3 t == "'re" = Just (Text.take 3 t, Text.drop 3 t)
-    | Text.length t >= 2
-    , Text.index t 0 == '\''
-    , Text.index t 1 `elem` ['s','d','m','t'] =
-        Just (Text.take 2 t, Text.drop 2 t)
-    | otherwise = Nothing
+    -- Contractions: '(?:[sdmt]|ll|ve|re)
+    matchContraction t
+      | Text.take 3 t == "'ll" = Just (Text.take 3 t, Text.drop 3 t)
+      | Text.take 3 t == "'ve" = Just (Text.take 3 t, Text.drop 3 t)
+      | Text.take 3 t == "'re" = Just (Text.take 3 t, Text.drop 3 t)
+      | Text.length t >= 2,
+        Text.index t 0 == '\'',
+        Text.index t 1 `elem` ['s', 'd', 'm', 't'] =
+          Just (Text.take 2 t, Text.drop 2 t)
+      | otherwise = Nothing
 
-  -- Optional space followed by letters:  ?\p{L}+
-  matchOptSpaceLetters t =
-    let (sp, rest1) = matchOptSpace t
-        (letters, rest2) = Text.span isAlpha rest1
-    in if Text.null letters then Nothing
-       else Just (sp <> letters, rest2)
+    -- Optional space followed by letters:  ?\p{L}+
+    matchOptSpaceLetters t =
+      let (sp, rest1) = matchOptSpace t
+          (letters, rest2) = Text.span isAlpha rest1
+       in if Text.null letters
+            then Nothing
+            else Just (sp <> letters, rest2)
 
-  -- Optional space followed by digits:  ?\p{N}+
-  matchOptSpaceDigits t =
-    let (sp, rest1) = matchOptSpace t
-        (digits, rest2) = Text.span isDigit rest1
-    in if Text.null digits then Nothing
-       else Just (sp <> digits, rest2)
+    -- Optional space followed by digits:  ?\p{N}+
+    matchOptSpaceDigits t =
+      let (sp, rest1) = matchOptSpace t
+          (digits, rest2) = Text.span isDigit rest1
+       in if Text.null digits
+            then Nothing
+            else Just (sp <> digits, rest2)
 
-  -- Optional space followed by punctuation:  ?[^\s\p{L}\p{N}]+
-  matchOptSpacePunct t =
-    let (sp, rest1) = matchOptSpace t
-        (punct, rest2) = Text.span (\c -> not (isSpace c) && not (isAlpha c) && not (isDigit c)) rest1
-    in if Text.null punct then Nothing
-       else Just (sp <> punct, rest2)
+    -- Optional space followed by punctuation:  ?[^\s\p{L}\p{N}]+
+    matchOptSpacePunct t =
+      let (sp, rest1) = matchOptSpace t
+          (punct, rest2) = Text.span (\c -> not (isSpace c) && not (isAlpha c) && not (isDigit c)) rest1
+       in if Text.null punct
+            then Nothing
+            else Just (sp <> punct, rest2)
 
-  -- Trailing whitespace: \s+(?!\S)  = whitespace at end of string
-  matchTrailingSpace t =
-    let (sp, rest) = Text.span isSpace t
-    in if Text.null sp || not (Text.null rest) then Nothing
-       else Just (sp, rest)
+    -- Trailing whitespace: \s+(?!\S)  = whitespace at end of string
+    matchTrailingSpace t =
+      let (sp, rest) = Text.span isSpace t
+       in if Text.null sp || not (Text.null rest)
+            then Nothing
+            else Just (sp, rest)
 
-  -- Other whitespace: \s+
-  matchSpace t =
-    let (sp, rest) = Text.span isSpace t
-    in if Text.null sp then Nothing
-       else Just (sp, rest)
+    -- Other whitespace: \s+
+    matchSpace t =
+      let (sp, rest) = Text.span isSpace t
+       in if Text.null sp
+            then Nothing
+            else Just (sp, rest)
 
-  -- Match optional single space
-  matchOptSpace t
-    | not (Text.null t), isSpace (Text.head t) = (Text.take 1 t, Text.drop 1 t)
-    | otherwise = ("", t)
+    -- Match optional single space
+    matchOptSpace t
+      | not (Text.null t), isSpace (Text.head t) = (Text.take 1 t, Text.drop 1 t)
+      | otherwise = ("", t)
 
-  (<|>) :: Maybe a -> Maybe a -> Maybe a
-  Nothing <|> y = y
-  x <|> _ = x
+    (<|>) :: Maybe a -> Maybe a -> Maybe a
+    Nothing <|> y = y
+    x <|> _ = x
 
 -- | Encode a single text chunk
 encodeChunk :: BPEModel -> Text -> Vector Word32

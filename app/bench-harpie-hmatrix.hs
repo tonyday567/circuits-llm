@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+
 module Main where
 
 import Control.DeepSeq (force)
@@ -28,7 +29,7 @@ randMatrix r c seed = LA.reshape c (LA.fromList (take (r * c) values))
 bench :: String -> [(a, b)] -> ((a, b) -> Double) -> IO ()
 bench name inputs action = do
   let runOne = evaluate . force . action
-  mapM_ runOne inputs  -- warmup and force
+  mapM_ runOne inputs -- warmup and force
   start <- getCPUTime
   mapM_ runOne inputs
   end <- getCPUTime
@@ -44,13 +45,15 @@ main = do
   let configs :: [(Int, Int)]
       configs = [(16, 1000), (64, 100), (256, 10), (512, 5)]
 
-  mapM_ (\(n, iters) -> do
-    let inputsHarpie = [(randArray n n (fromIntegral i), randArray n n (fromIntegral i + 1000)) | i <- [1 .. iters]]
-        inputsHmatrix = [(randMatrix n n (fromIntegral i), randMatrix n n (fromIntegral i + 1000)) | i <- [1 .. iters]]
-    printf "\n%dx%d matrix multiply (%d iters):\n" n n iters
-    bench "harpie generic mult"  inputsHarpie  (\(a, b) -> sum (a `HA.mult` b))
-    bench "harpie hmatrix multM" inputsHarpie  (\(a, b) -> sum (a `multM` b))
-    bench "hmatrix direct"       inputsHmatrix (\(a, b) -> LA.sumElements (a <> b))
-    ) configs
+  mapM_
+    ( \(n, iters) -> do
+        let inputsHarpie = [(randArray n n (fromIntegral i), randArray n n (fromIntegral i + 1000)) | i <- [1 .. iters]]
+            inputsHmatrix = [(randMatrix n n (fromIntegral i), randMatrix n n (fromIntegral i + 1000)) | i <- [1 .. iters]]
+        printf "\n%dx%d matrix multiply (%d iters):\n" n n iters
+        bench "harpie generic mult" inputsHarpie (\(a, b) -> sum (a `HA.mult` b))
+        bench "harpie hmatrix multM" inputsHarpie (\(a, b) -> sum (a `multM` b))
+        bench "hmatrix direct" inputsHmatrix (\(a, b) -> LA.sumElements (a <> b))
+    )
+    configs
 
   putStrLn "\nDONE"

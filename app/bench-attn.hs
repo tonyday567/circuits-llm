@@ -1,4 +1,5 @@
-{-# LANGUAGE OverloadedStrings, BangPatterns #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 module Main where
 
 import Circuit.LLM.Attention
@@ -11,9 +12,9 @@ import Text.Printf (printf)
 
 randArray :: Int -> Int -> Double -> Array Double
 randArray rows cols seed = array [rows, cols] (take (rows * cols) values)
- where
-  values = iterate nextR (sin seed * 0.5 + 0.5)
-  nextR x = sin (x * 127.1 + 311.7) * 0.5 + 0.5
+  where
+    values = iterate nextR (sin seed * 0.5 + 0.5)
+    nextR x = sin (x * 127.1 + 311.7) * 0.5 + 0.5
 
 main :: IO ()
 main = do
@@ -35,22 +36,28 @@ main = do
   t0 <- getCPUTime
   s <- evaluate (sum (softmax x))
   t1 <- getCPUTime
-  printf "  softmax row-wise                  %10.4f ms  sum=%s\n"
-    (fromIntegral (t1-t0) / 1e9 :: Double) (show s)
+  printf
+    "  softmax row-wise                  %10.4f ms  sum=%s\n"
+    (fromIntegral (t1 - t0) / 1e9 :: Double)
+    (show s)
 
   -- sdpa
   t2 <- getCPUTime
   s2 <- evaluate (sum (scaledDotProductAttention q k v mask))
   t3 <- getCPUTime
-  printf "  sdpa (single head)                %10.4f ms  sum=%s\n"
-    (fromIntegral (t3-t2) / 1e9 :: Double) (show s2)
+  printf
+    "  sdpa (single head)                %10.4f ms  sum=%s\n"
+    (fromIntegral (t3 - t2) / 1e9 :: Double)
+    (show s2)
 
   -- mha
   t4 <- getCPUTime
   s3 <- evaluate (sum (multiHeadAttention nHead x wq wk wv wo mask))
   t5 <- getCPUTime
-  printf "  multi-head attention              %10.4f ms  sum=%s\n"
-    (fromIntegral (t5-t4) / 1e9 :: Double) (show s3)
+  printf
+    "  multi-head attention              %10.4f ms  sum=%s\n"
+    (fromIntegral (t5 - t4) / 1e9 :: Double)
+    (show s3)
 
 bench :: String -> Int -> Int -> IO () -> IO ()
 bench name warmup iters action = do
@@ -60,5 +67,8 @@ bench name warmup iters action = do
   end <- getCPUTime
   let ns = end - start
       ms = fromIntegral ns / 1e9 :: Double
-  printf "  %-37s %10.4f ms  (%5.1f µs each)\n"
-    name ms (ms * 1000.0 / fromIntegral iters)
+  printf
+    "  %-37s %10.4f ms  (%5.1f µs each)\n"
+    name
+    ms
+    (ms * 1000.0 / fromIntegral iters)

@@ -1,12 +1,24 @@
 {-# LANGUAGE OverloadedStrings #-}
+
 module Main where
 
-import Circuit.LLM.Backprop (linearBwd, crossEntropyBwd, softmaxBwd, geluBwd)
+import Circuit.LLM.Backprop (crossEntropyBwd, geluBwd, linearBwd, softmaxBwd)
 import Numeric.LinearAlgebra
-  ( Matrix, Vector, cmap, fromList, fromRows, konst, reshape, rows, cols
-  , scale, sumElements, toList, maxElement
+  ( Matrix,
+    Vector,
+    cmap,
+    cols,
+    fromList,
+    fromRows,
+    konst,
+    maxElement,
+    reshape,
+    rows,
+    scale,
+    sumElements,
+    toList,
   )
-import qualified Numeric.LinearAlgebra as LA
+import Numeric.LinearAlgebra qualified as LA
 
 main :: IO ()
 main = do
@@ -19,7 +31,7 @@ main = do
   putStrLn $ "  grad sum = " ++ show (sumElements grad0)
   putStrLn $ if abs (sumElements grad0) < 1e-10 then "  PASS (grad sums to 0)" else "  FAIL"
 
-  -- Test 2: softmax backward  
+  -- Test 2: softmax backward
   putStrLn "\n=== Softmax backward ==="
   let scores = fromRows [fromList [1.0, 2.0, 3.0 :: Double]]
       probs = softmaxScores scores
@@ -30,12 +42,12 @@ main = do
 
   -- Test 3: linear backward
   putStrLn "\n=== Linear backward ==="
-  let x = reshape 2 (fromList [1,2,3,4 :: Double])  -- [2x2]
-      w = reshape 2 (fromList [1,0,0,1 :: Double])  -- [2x2] identity
+  let x = reshape 2 (fromList [1, 2, 3, 4 :: Double]) -- [2x2]
+      w = reshape 2 (fromList [1, 0, 0, 1 :: Double]) -- [2x2] identity
       y = x LA.<> w
       ones = reshape (cols y) (fromList (replicate (rows y * cols y) 1.0))
       (gradX, gradW, _) = linearBwd x w ones
-  putStrLn $ "  x = [1,2; 3,4], W = I, dL/dy = ones"
+  putStrLn "  x = [1,2; 3,4], W = I, dL/dy = ones"
   putStrLn $ "  gradX = " ++ show (toList (LA.flatten gradX))
   putStrLn $ "  gradW = " ++ show (toList (LA.flatten gradW))
   -- gradX should be gradY @ W^T = ones @ I = ones
@@ -55,9 +67,11 @@ main = do
   putStrLn "\nAll gradient checks complete."
 
 softmaxScores :: Matrix Double -> Matrix Double
-softmaxScores m = fromRows
-  [ let mx = maxElement row
-        shifted = cmap (\x -> exp (x - mx)) row
-        sm = sumElements shifted
-    in  scale (1 / sm) shifted
-  | row <- LA.toRows m ]
+softmaxScores m =
+  fromRows
+    [ let mx = maxElement row
+          shifted = cmap (\x -> exp (x - mx)) row
+          sm = sumElements shifted
+       in scale (1 / sm) shifted
+    | row <- LA.toRows m
+    ]

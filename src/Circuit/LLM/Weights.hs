@@ -27,26 +27,37 @@
 -- @
 module Circuit.LLM.Weights
   ( -- * Loading
-    loadGpt2
-  , loadGpt2With
-  , loadMatrix
-  , loadVector
+    loadGpt2,
+    loadGpt2With,
+    loadMatrix,
+    loadVector,
 
     -- * GPT-2 architecture dimensions
-  , Gpt2Size (..)
-  , sizeConfig
-  ) where
+    Gpt2Size (..),
+    sizeConfig,
+  )
+where
 
 import Circuit.LLM.GPT
-  ( FeedForward (..), Gpt (..), GptConfig (..), TransformerBlock (..) )
+  ( FeedForward (..),
+    Gpt (..),
+    GptConfig (..),
+    TransformerBlock (..),
+  )
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
+import Data.ByteString qualified as BS
 import Data.Word (Word32)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (peek, poke)
 import Numeric.LinearAlgebra
-  ( Matrix, Vector, fromList, reshape, subMatrix, tr )
+  ( Matrix,
+    Vector,
+    fromList,
+    reshape,
+    subMatrix,
+    tr,
+  )
 import System.IO.Unsafe (unsafePerformIO)
 
 ----------------------------------------------------------------------
@@ -59,10 +70,10 @@ data Gpt2Size = Gpt2Small | Gpt2Medium | Gpt2Large | Gpt2Xl
 
 -- | Model configuration for each preset.
 sizeConfig :: Gpt2Size -> GptConfig
-sizeConfig Gpt2Small  = GptConfig 50257 768  12 12
+sizeConfig Gpt2Small = GptConfig 50257 768 12 12
 sizeConfig Gpt2Medium = GptConfig 50257 1024 16 24
-sizeConfig Gpt2Large  = GptConfig 50257 1280 20 36
-sizeConfig Gpt2Xl     = GptConfig 50257 1600 25 48
+sizeConfig Gpt2Large = GptConfig 50257 1280 20 36
+sizeConfig Gpt2Xl = GptConfig 50257 1600 25 48
 
 ----------------------------------------------------------------------
 -- Top-level loader
@@ -77,22 +88,23 @@ loadGpt2With dir cfg = do
       vocab = gptVocabSize cfg
       maxSeq = 1024
 
-  wte  <- loadMatrix (dir ++ "/wte.f32")  vocab nEmb
-  wpe  <- loadMatrix (dir ++ "/wpe.f32")  maxSeq nEmb
+  wte <- loadMatrix (dir ++ "/wte.f32") vocab nEmb
+  wpe <- loadMatrix (dir ++ "/wpe.f32") maxSeq nEmb
   blocks <- mapM (loadBlock dir nEmb nHead) [0 .. nLayer - 1]
   lnG <- loadVector (dir ++ "/lnf.gamma.f32") nEmb
-  lnB <- loadVector (dir ++ "/lnf.beta.f32")  nEmb
+  lnB <- loadVector (dir ++ "/lnf.beta.f32") nEmb
 
-  pure Gpt
-    { gptWte     = wte
-    , gptWpe     = wpe
-    , gptBlocks  = blocks
-    , gptLnGamma = lnG
-    , gptLnBeta  = lnB
-    -- Tie output head to transposed token embeddings (weight tying)
-    , gptHead    = tr wte  -- [n_embd, vocab]
-    , gptHeadB   = zeroVector vocab
-    }
+  pure
+    Gpt
+      { gptWte = wte,
+        gptWpe = wpe,
+        gptBlocks = blocks,
+        gptLnGamma = lnG,
+        gptLnBeta = lnB,
+        -- Tie output head to transposed token embeddings (weight tying)
+        gptHead = tr wte, -- [n_embd, vocab]
+        gptHeadB = zeroVector vocab
+      }
 
 -- | Load a full GPT-2 model from a weight directory.
 loadGpt2 :: FilePath -> Gpt2Size -> IO Gpt
@@ -105,39 +117,41 @@ loadBlock dir nEmb nHead h = do
       ffMul = 4
 
   ln1G <- loadVector (pfx ++ "ln1.gamma.f32") nEmb
-  ln1B <- loadVector (pfx ++ "ln1.beta.f32")  nEmb
+  ln1B <- loadVector (pfx ++ "ln1.beta.f32") nEmb
   qkvW <- loadMatrix (pfx ++ "attn.qkv.w.f32") nEmb (3 * nEmb)
   qkvB <- loadVector (pfx ++ "attn.qkv.b.f32") (3 * nEmb)
   projW <- loadMatrix (pfx ++ "attn.proj.w.f32") nEmb nEmb
   projB <- loadVector (pfx ++ "attn.proj.b.f32") nEmb
   ln2G <- loadVector (pfx ++ "ln2.gamma.f32") nEmb
-  ln2B <- loadVector (pfx ++ "ln2.beta.f32")  nEmb
-  fcW  <- loadMatrix (pfx ++ "mlp.fc.w.f32")  nEmb (ffMul * nEmb)
-  fcB  <- loadVector (pfx ++ "mlp.fc.b.f32")  (ffMul * nEmb)
+  ln2B <- loadVector (pfx ++ "ln2.beta.f32") nEmb
+  fcW <- loadMatrix (pfx ++ "mlp.fc.w.f32") nEmb (ffMul * nEmb)
+  fcB <- loadVector (pfx ++ "mlp.fc.b.f32") (ffMul * nEmb)
   proj2W <- loadMatrix (pfx ++ "mlp.proj.w.f32") (ffMul * nEmb) nEmb
   proj2B <- loadVector (pfx ++ "mlp.proj.b.f32") nEmb
 
   -- Split fused Q,K,V projection: columns [0:nEmb], [nEmb:2*nEmb], [2*nEmb:3*nEmb]
-  let wQ = subMatrix (0, 0)        (nEmb, nEmb)     qkvW
-      wK = subMatrix (0, nEmb)     (nEmb, nEmb)     qkvW
-      wV = subMatrix (0, 2 * nEmb) (nEmb, nEmb)     qkvW
+  let wQ = subMatrix (0, 0) (nEmb, nEmb) qkvW
+      wK = subMatrix (0, nEmb) (nEmb, nEmb) qkvW
+      wV = subMatrix (0, 2 * nEmb) (nEmb, nEmb) qkvW
 
-  pure TransformerBlock
-    { tbAttnWq = wQ
-    , tbAttnWk = wK
-    , tbAttnWv = wV
-    , tbAttnWo = projW
-    , tbAttnLnGamma = ln1G
-    , tbAttnLnBeta  = ln1B
-    , tbFfn = FeedForward
-        { ffW1 = fcW
-        , ffB1 = fcB
-        , ffW2 = proj2W
-        , ffB2 = proj2B
-        }
-    , tbFfnLnGamma = ln2G
-    , tbFfnLnBeta  = ln2B
-    }
+  pure
+    TransformerBlock
+      { tbAttnWq = wQ,
+        tbAttnWk = wK,
+        tbAttnWv = wV,
+        tbAttnWo = projW,
+        tbAttnLnGamma = ln1G,
+        tbAttnLnBeta = ln1B,
+        tbFfn =
+          FeedForward
+            { ffW1 = fcW,
+              ffB1 = fcB,
+              ffW2 = proj2W,
+              ffB2 = proj2B
+            },
+        tbFfnLnGamma = ln2G,
+        tbFfnLnBeta = ln2B
+      }
 
 ----------------------------------------------------------------------
 -- Binary file I/O
@@ -170,7 +184,7 @@ parseFloats bs
   | BS.length bs < 4 = []
   | otherwise =
       let (chunk, rest) = BS.splitAt 4 bs
-      in  realToFrac (word32ToFloat (readWord32LE chunk)) : parseFloats rest
+       in realToFrac (word32ToFloat (readWord32LE chunk)) : parseFloats rest
 
 -- | Read a little-endian 32-bit word from 4 bytes.
 readWord32LE :: ByteString -> Word32

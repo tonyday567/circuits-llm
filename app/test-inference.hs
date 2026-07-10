@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+
 module Main where
 
 import Circuit.LLM.GPT (GptConfig (..), forward)
@@ -8,12 +9,13 @@ import Numeric.LinearAlgebra (sumElements)
 
 main :: IO ()
 main = do
-  let cfg = GptConfig
-        { gptVocabSize = 1000
-        , gptNEmbd     = 32
-        , gptNHead     = 4
-        , gptNLayer    = 2
-        }
+  let cfg =
+        GptConfig
+          { gptVocabSize = 1000,
+            gptNEmbd = 32,
+            gptNHead = 4,
+            gptNLayer = 2
+          }
 
   putStrLn "Loading synthetic weights..."
   m <- loadGpt2With "/tmp/gpt2-weights" cfg

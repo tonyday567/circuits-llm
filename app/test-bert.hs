@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+
 module Main where
 
 import Circuit.LLM.GPT (GptConfig (..))
@@ -7,10 +8,17 @@ import Circuit.LLM.Weights (loadGpt2With)
 
 main :: IO ()
 main = do
-  let cfg = GptConfig { gptVocabSize = 1000, gptNEmbd = 32, gptNHead = 4, gptNLayer = 2 }
-      lr = 1e-3; beta1 = 0.9; beta2 = 0.999; eps = 1e-8; wd = 0.01
-      seqLen = 8; steps = 10; maskRate = 0.15; maskId = 0
-      data_ = concat (replicate 50 [1..10 :: Int])
+  let cfg = GptConfig {gptVocabSize = 1000, gptNEmbd = 32, gptNHead = 4, gptNLayer = 2}
+      lr = 1e-3
+      beta1 = 0.9
+      beta2 = 0.999
+      eps = 1e-8
+      wd = 0.01
+      seqLen = 8
+      steps = 10
+      maskRate = 0.15
+      maskId = 0
+      data_ = concat (replicate 50 [1 .. 10 :: Int])
 
   putStrLn "Loading synthetic weights..."
   m <- loadGpt2With "/tmp/gpt2-weights" cfg

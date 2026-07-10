@@ -40,8 +40,11 @@ main = do
   (coldNs, enc) <- ticksION 1 (pure $! encodeBPE model text)
   let coldMs = fromIntegral coldNs / 1e6 :: Double
       numTokens = V.length (encodedTokens enc)
-  printf "  %7.2f ms   %d tokens   %7.0f tok/s\n"
-    coldMs numTokens (fromIntegral numTokens / (coldMs / 1000))
+  printf
+    "  %7.2f ms   %d tokens   %7.0f tok/s\n"
+    coldMs
+    numTokens
+    (fromIntegral numTokens / (coldMs / 1000))
 
   -- Repeated encode
   let nWarm = 5
@@ -51,8 +54,10 @@ main = do
   putStrLn $ "\n=== steady state (" ++ show nMeas ++ " encodes) ==="
   (avgNs, _) <- ticksION nMeas (pure $! encodeBPE model text)
   let avgMs = fromIntegral avgNs / 1e6 :: Double
-  printf "  %7.2f ms avg   %d tokens   %7.0f tok/s   %7.0f chars/s\n"
-    avgMs numTokens
+  printf
+    "  %7.2f ms avg   %d tokens   %7.0f tok/s   %7.0f chars/s\n"
+    avgMs
+    numTokens
     (fromIntegral numTokens / (avgMs / 1000))
     (fromIntegral textLen / (avgMs / 1000))
 
@@ -63,7 +68,7 @@ main = do
 
   -- Roundtrip
   let decoded = decodeBPE model (encodedTokens enc)
-  putStrLn $ "\n=== roundtrip ==="
+  putStrLn "\n=== roundtrip ==="
   putStrLn $ "  " ++ (if text == decoded then "PASS" else "FAIL  (len " ++ show (T.length text) ++ " vs " ++ show (T.length decoded) ++ ")")
 
   hFlush stdout
