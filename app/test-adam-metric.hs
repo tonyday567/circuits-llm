@@ -18,13 +18,14 @@ import Circuit.AD.Metric (raiseWith)
 import NumHask.Diff (Diff, pattern Diff)
 import Circuit.LLM.Training (updateVector)
 import Control.DeepSeq (NFData (..), force, ($!!))
-import Data.Functor.Rep (liftR2)
+
 import Control.Exception (evaluate)
 import Data.List (zipWith3)
 import Data.String (fromString)
-import Data.Vector qualified as V
+import Data.Vector.Storable qualified as VS
 import GHC.TypeNats (KnownNat)
-import Harpie.Fixed (Array (..), array, asVector)
+import Harpie.Fixed.Generic qualified as G
+import Harpie.Fixed.Storable (Array, array, asVector)
 import Harpie.NumHask ()
 import Numeric.LinearAlgebra (Vector)
 import Numeric.LinearAlgebra qualified as LA
@@ -34,9 +35,9 @@ import Data.Time.Clock (diffUTCTime, getCurrentTime)
 import Text.Printf (printf)
 import Prelude ()
 
--- | Orphan: 'Array' stores a boxed vector, so forcing it is forcing the vector.
+-- | Orphan: forcing an 'Array' forces its underlying storable vector.
 instance (NFData a) => NFData (Array s a) where
-  rnf (Array v) = rnf v
+  rnf (G.Array v) = rnf v
 
 -- ----------------------------------------------------------------------
 -- Metric preconditioners
@@ -51,9 +52,9 @@ adamMetric ::
   Double ->
   Diff (Array '[n] Double, Array '[n] Double) (Array '[n] Double)
 adamMetric eps = Diff $ \(v, c) ->
-  let lowered = liftR2 (\c_i v_i -> c_i / (NH.sqrt v_i + eps)) c v
+  let lowered = G.zipWith (\c_i v_i -> c_i / (NH.sqrt v_i + eps)) c v
    in ( lowered,
-        \dc -> (zero, liftR2 (\dc_i v_i -> dc_i / (NH.sqrt v_i + eps)) dc v)
+        \dc -> (zero, G.zipWith (\dc_i v_i -> dc_i / (NH.sqrt v_i + eps)) dc v)
       )
 
 -- | Identity metric @g = δ@; reduces the update to SGD with weight decay.
@@ -87,7 +88,7 @@ toArray :: forall n. (KnownNat n) => Vector Double -> Array '[n] Double
 toArray v = array (LA.toList v)
 
 fromArray :: forall n. (KnownNat n) => Array '[n] Double -> Vector Double
-fromArray a = LA.fromList (V.toList (asVector a))
+fromArray a = LA.fromList (VS.toList (asVector a))
 
 -- ----------------------------------------------------------------------
 -- Benchmark harness
