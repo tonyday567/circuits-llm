@@ -7,6 +7,10 @@ module Circuit.LLM.Training
     initAdamW,
     adamwStep,
 
+    -- * Parameter updates (exported for metric-oracle tests)
+    updateVector,
+    updateMatrix,
+
     -- * Training
     trainStep,
     trainLoop,

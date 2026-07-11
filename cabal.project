@@ -1,2 +1,46 @@
 packages: circuits-llm.cabal
-constraints: harpie +hmatrix
+
+source-repository-package
+  type: git
+  location: https://github.com/tonyday567/numhask.git
+  branch: v0.14
+
+source-repository-package
+  type: git
+  location: https://github.com/tonyday567/numhask-diff.git
+  branch: main
+
+source-repository-package
+  type: git
+  location: https://github.com/tonyday567/harpie.git
+  branch: feat/strict-index
+
+source-repository-package
+  type: git
+  location: https://github.com/tonyday567/harpie-numhask.git
+  branch: feature/numhask-0.14
+
+source-repository-package
+  type: git
+  location: https://github.com/tonyday567/circuits.git
+  branch: main
+
+source-repository-package
+  type: git
+  location: https://github.com/tonyday567/circuits-ad.git
+  branch: feature/metric-adjoint
+
+constraints:
+  circuits >= 0.2,
+  circuits-ad >= 0.1
+
+write-ghc-environment-files: always
+
+allow-newer:
+  ad-delcont:base
+
+package recursion-schemes
+  flags: -template-haskell
+
+package harpie
+  flags: +hmatrix
