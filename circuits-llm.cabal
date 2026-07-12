@@ -239,18 +239,6 @@ executable bench-hmatrix
   default-language: GHC2024
   ghc-options: -O2
 
-executable bench-harpie-hmatrix
-  main-is: bench-harpie-hmatrix.hs
-  hs-source-dirs: app
-  build-depends:
-    base >=4.20 && <5,
-    deepseq >=1.5 && <1.6,
-    harpie >=0.2 && <0.4,
-    hmatrix >=0.20 && <0.21,
-
-  default-language: GHC2024
-  ghc-options: -O2
-
 executable test-gpt
   main-is: test-gpt.hs
   hs-source-dirs: app
