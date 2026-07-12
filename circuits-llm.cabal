@@ -37,7 +37,7 @@ library
     circuits-ad >=0.1 && <0.2,
     containers >=0.6 && <0.9,
     deepseq >=1.5 && <1.6,
-    harpie >=0.2 && <0.3,
+    harpie >=0.2 && <0.4,
     hmatrix >=0.20 && <0.21,
     random >=1.2 && <1.3,
     text >=2.0 && <3,
@@ -103,7 +103,7 @@ executable test-attn
   build-depends:
     base >=4.20 && <5,
     circuits-llm >=0.1 && <0.2,
-    harpie >=0.2 && <0.3,
+    harpie >=0.2 && <0.4,
     vector >=0.13 && <0.14,
 
   default-language: GHC2024
@@ -115,7 +115,7 @@ executable bench-attn
   build-depends:
     base >=4.20 && <5,
     circuits-llm >=0.1 && <0.2,
-    harpie >=0.2 && <0.3,
+    harpie >=0.2 && <0.4,
 
   default-language: GHC2024
   ghc-options: -O2 -rtsopts
@@ -126,7 +126,7 @@ executable debug-attn
   build-depends:
     base >=4.20 && <5,
     circuits-llm >=0.1 && <0.2,
-    harpie >=0.2 && <0.3,
+    harpie >=0.2 && <0.4,
 
   default-language: GHC2024
   ghc-options: -O2
@@ -206,7 +206,7 @@ executable test-adam-metric
     circuits-ad >=0.1 && <0.2,
     circuits-llm >=0.1 && <0.2,
     deepseq >=1.5 && <1.6,
-    harpie >=0.2 && <0.3,
+    harpie >=0.2 && <0.4,
     harpie-numhask >=0.2 && <0.3,
     hmatrix >=0.20 && <0.21,
     numhask >=0.14 && <0.15,
@@ -233,7 +233,7 @@ executable bench-hmatrix
   hs-source-dirs: app
   build-depends:
     base >=4.20 && <5,
-    harpie >=0.2 && <0.3,
+    harpie >=0.2 && <0.4,
     hmatrix >=0.20 && <0.21,
 
   default-language: GHC2024
@@ -245,7 +245,7 @@ executable bench-harpie-hmatrix
   build-depends:
     base >=4.20 && <5,
     deepseq >=1.5 && <1.6,
-    harpie >=0.2 && <0.3,
+    harpie >=0.2 && <0.4,
     hmatrix >=0.20 && <0.21,
 
   default-language: GHC2024
@@ -257,7 +257,7 @@ executable test-gpt
   build-depends:
     base >=4.20 && <5,
     circuits-llm >=0.1 && <0.2,
-    harpie >=0.2 && <0.3,
+    harpie >=0.2 && <0.4,
     hmatrix >=0.20 && <0.21,
 
   default-language: GHC2024
