@@ -1,9 +1,12 @@
+-- Local overrides. Keep package list in sync with cabal.project.
+-- numhask-free was extracted/renamed; use numhask-diff instead.
 packages:
   circuits-llm.cabal
-  ../circuits/circuits.cabal
   ../circuits-ad/circuits-ad.cabal
+  ../circuits/circuits.cabal
   ../numhask/numhask.cabal
-  ../numhask-free/numhask-free.cabal
+  ../numhask-diff/numhask-diff.cabal
+  ../harpie/harpie.cabal
+  ../harpie-numhask/harpie-numhask.cabal
   ../../other/ad-delcont/ad-delcont.cabal
   ../circuits-meter/circuits-meter.cabal
-  ../harpie/harpie.cabal
