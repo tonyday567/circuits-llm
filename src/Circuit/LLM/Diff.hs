@@ -11,7 +11,9 @@
 -- attention mask that is added to the raw QK^T scores.
 module Circuit.LLM.Diff
   ( -- * Differentiable operations
-    DiffP (..),
+    DiffP,
+    primForward,
+    primBackward,
     (@.),
     residual,
     splitP,
@@ -50,6 +52,7 @@ module Circuit.LLM.Diff
   )
 where
 
+import Circuit.AD.Param (TensorPrim (..))
 import Circuit.AD.Param qualified as ADP
 import Circuit.LLM.GPT (FeedForward (..), Gpt (..), GptConfig (..), TransformerBlock (..))
 import Data.List (foldl1')
@@ -82,24 +85,22 @@ import Numeric.LinearAlgebra qualified as LA
 -- Running forward produces the output.  The backward pass, given the output
 -- cotangent, produces the input cotangent and parameter gradients.
 --
--- This is exactly the same shape as 'Circuit.AD.Diff' from circuits-ad,
--- but the carrier is hmatrix instead of a closure-per-scalar.
-data DiffP p a b = DiffP
-  { forwardP :: p -> a -> b,
-    backwardP :: p -> a -> b -> (a, p)
-  }
+-- This is exactly the same shape as 'Circuit.AD.Param.TensorPrim' from
+-- circuits-ad; we use a local type synonym so the rest of the module keeps
+-- its paired-parameter composition style.
+type DiffP = TensorPrim
 
 -- | Sequential composition: @f '@.' g@ means "first @g@, then @f@".
 infixr 9 @.
 
 (@.) :: DiffP p2 b c -> DiffP p1 a b -> DiffP (p1, p2) a c
-DiffP f2 b2 @. DiffP f1 b1 =
-  DiffP
-    { forwardP = \(p1, p2) a -> f2 p2 (f1 p1 a),
-      backwardP = \(p1, p2) a dc ->
-        let b = f1 p1 a
-            (db, dp2) = b2 p2 b dc
-            (da, dp1) = b1 p1 a db
+f2 @. f1 =
+  TensorPrim
+    { primForward = \(p1, p2) a -> primForward f2 p2 (primForward f1 p1 a),
+      primBackward = \(p1, p2) a dc ->
+        let b = primForward f1 p1 a
+            (db, dp2) = primBackward f2 p2 b dc
+            (da, dp1) = primBackward f1 p1 a db
          in (da, (dp1, dp2))
     }
 
@@ -108,34 +109,34 @@ DiffP f2 b2 @. DiffP f1 b1 =
 --   backward: dx = dy + dOp
 residual :: (Num a) => DiffP p a a -> DiffP p a a
 residual op =
-  DiffP
-    { forwardP = \p a -> a + forwardP op p a,
-      backwardP = \p a dy ->
-        let (daOp, dp) = backwardP op p a dy
+  TensorPrim
+    { primForward = \p a -> a + primForward op p a,
+      primBackward = \p a dy ->
+        let (daOp, dp) = primBackward op p a dy
          in (dy + daOp, dp)
     }
 
 -- | Split a parameter tuple so the left and right halves can be used
 --   by independent parallel branches.
 splitP :: DiffP p1 a1 b1 -> DiffP p2 a2 b2 -> DiffP (p1, p2) (a1, a2) (b1, b2)
-splitP (DiffP f1 b1) (DiffP f2 b2) =
-  DiffP
-    { forwardP = \(p1, p2) (a1, a2) -> (f1 p1 a1, f2 p2 a2),
-      backwardP = \(p1, p2) (a1, a2) (db1, db2) ->
-        let (da1, dp1) = b1 p1 a1 db1
-            (da2, dp2) = b2 p2 a2 db2
+splitP f1 f2 =
+  TensorPrim
+    { primForward = \(p1, p2) (a1, a2) -> (primForward f1 p1 a1, primForward f2 p2 a2),
+      primBackward = \(p1, p2) (a1, a2) (db1, db2) ->
+        let (da1, dp1) = primBackward f1 p1 a1 db1
+            (da2, dp2) = primBackward f2 p2 a2 db2
          in ((da1, da2), (dp1, dp2))
     }
 
 -- | Pair two operations that share the same input type but produce
 --   independent outputs.  This is useful for attention Q/K/V from one x.
 joinP :: (Num a) => DiffP p1 a b1 -> DiffP p2 a b2 -> DiffP (p1, p2) a (b1, b2)
-joinP (DiffP f1 b1) (DiffP f2 b2) =
-  DiffP
-    { forwardP = \(p1, p2) a -> (f1 p1 a, f2 p2 a),
-      backwardP = \(p1, p2) a (db1, db2) ->
-        let (da1, dp1) = b1 p1 a db1
-            (da2, dp2) = b2 p2 a db2
+joinP f1 f2 =
+  TensorPrim
+    { primForward = \(p1, p2) a -> (primForward f1 p1 a, primForward f2 p2 a),
+      primBackward = \(p1, p2) a (db1, db2) ->
+        let (da1, dp1) = primBackward f1 p1 a db1
+            (da2, dp2) = primBackward f2 p2 a db2
          in (da1 + da2, (dp1, dp2))
     }
 
@@ -146,9 +147,9 @@ joinP (DiffP f1 b1) (DiffP f2 b2) =
 -- | Linear layer: y = xW + b
 linearP :: DiffP (Matrix Double, Vector Double) (Matrix Double) (Matrix Double)
 linearP =
-  DiffP
-    { forwardP = \(w, b) x -> x LA.<> w + broadcastBias b (rows x),
-      backwardP = \(w, _) x dy ->
+  TensorPrim
+    { primForward = \(w, b) x -> x LA.<> w + broadcastBias b (rows x),
+      primBackward = \(w, _) x dy ->
         let dx = dy LA.<> tr w
             dw = tr x LA.<> dy
             db = fromList [sumElements col | col <- LA.toColumns dy]
@@ -167,9 +168,9 @@ geluP =
 -- | Row-wise softmax.
 softmaxP :: DiffP () (Matrix Double) (Matrix Double)
 softmaxP =
-  DiffP
-    { forwardP = \_ x -> softmaxStableF x,
-      backwardP = \_ x dy ->
+  TensorPrim
+    { primForward = \_ x -> softmaxStableF x,
+      primBackward = \_ x dy ->
         let probs = softmaxStableF x
          in (softmaxBwd probs dy, ())
     }
@@ -184,9 +185,9 @@ softmaxP =
 -- | Layer normalisation.
 layerNormP :: Double -> DiffP (Vector Double, Vector Double) (Matrix Double) (Matrix Double)
 layerNormP eps =
-  DiffP
-    { forwardP = \(gamma, beta) x -> layerNormF x gamma beta eps,
-      backwardP = \(gamma, beta) x dy ->
+  TensorPrim
+    { primForward = \(gamma, beta) x -> layerNormF x gamma beta eps,
+      primBackward = \(gamma, beta) x dy ->
         let (dx, dgamma, dbeta) = layerNormBwd x gamma beta eps dy
          in (dx, (dgamma, dbeta))
     }
@@ -205,8 +206,8 @@ multiHeadAttentionP ::
     (Matrix Double)
     (Matrix Double)
 multiHeadAttentionP nHead seqLen _eps mask =
-  DiffP
-    { forwardP = \(wq, wk, wv, wo) x ->
+  TensorPrim
+    { primForward = \(wq, wk, wv, wo) x ->
         let hDim = cols wq `div` nHead
             heads =
               [ let wQh = subMatrixW wq 0 (h * hDim) (rows wq) hDim
@@ -222,7 +223,7 @@ multiHeadAttentionP nHead seqLen _eps mask =
               ]
             ctx = concatColsF heads
          in ctx LA.<> wo,
-      backwardP = \(wq, wk, wv, wo) x dOut ->
+      primBackward = \(wq, wk, wv, wo) x dOut ->
         let hDim = cols wq `div` nHead
             dk = fromIntegral hDim :: Double
             -- Recompute forward intermediates
@@ -320,50 +321,50 @@ blockDiffP ::
   Matrix Double ->
   DiffP BlockParams (Matrix Double) (Matrix Double)
 blockDiffP nHead seqLen eps mask =
-  DiffP
-    { forwardP = \p x ->
+  TensorPrim
+    { primForward = \p x ->
         let attnOut =
-              forwardP
+              primForward
                 (multiHeadAttentionP nHead seqLen eps mask)
                 (bpAttnWq p, bpAttnWk p, bpAttnWv p, bpAttnWo p)
                 x
             postAttn = x + attnOut
             attnNorm = layerNormF postAttn (bpAttnLnGamma p) (bpAttnLnBeta p) eps
-            ffnHidden = forwardP linearP (bpFfnW1 p, bpFfnB1 p) attnNorm
+            ffnHidden = primForward linearP (bpFfnW1 p, bpFfnB1 p) attnNorm
             ffnActivated = geluF ffnHidden
-            ffnOut = forwardP linearP (bpFfnW2 p, bpFfnB2 p) ffnActivated
+            ffnOut = primForward linearP (bpFfnW2 p, bpFfnB2 p) ffnActivated
             ffnRes = attnNorm + ffnOut
          in layerNormF ffnRes (bpFfnLnGamma p) (bpFfnLnBeta p) eps,
-      backwardP = \p x dy ->
+      primBackward = \p x dy ->
         -- Forward recompute
         let attnOut =
-              forwardP
+              primForward
                 (multiHeadAttentionP nHead seqLen eps mask)
                 (bpAttnWq p, bpAttnWk p, bpAttnWv p, bpAttnWo p)
                 x
             postAttn = x + attnOut
             attnNorm = layerNormF postAttn (bpAttnLnGamma p) (bpAttnLnBeta p) eps
-            ffnHidden = forwardP linearP (bpFfnW1 p, bpFfnB1 p) attnNorm
+            ffnHidden = primForward linearP (bpFfnW1 p, bpFfnB1 p) attnNorm
             ffnActivated = geluF ffnHidden
-            ffnOut = forwardP linearP (bpFfnW2 p, bpFfnB2 p) ffnActivated
+            ffnOut = primForward linearP (bpFfnW2 p, bpFfnB2 p) ffnActivated
             ffnRes = attnNorm + ffnOut
             -- Backward through final LN
             (dFfnRes, (dgFfnGamma, dgFfnBeta)) =
-              backwardP (layerNormP eps) (bpFfnLnGamma p, bpFfnLnBeta p) ffnRes dy
+              primBackward (layerNormP eps) (bpFfnLnGamma p, bpFfnLnBeta p) ffnRes dy
             -- Backward through FFN residual: dFfnRes splits to attnNorm and FFN
             (dAttnNorm2, (dgFfnW2, dgFfnB2)) =
-              backwardP linearP (bpFfnW2 p, bpFfnB2 p) ffnActivated dFfnRes
+              primBackward linearP (bpFfnW2 p, bpFfnB2 p) ffnActivated dFfnRes
             (dFfnHidden, ()) =
               snd (ADP.runDiffP geluP () ffnHidden) dAttnNorm2
             (dAttnNorm1, (dgFfnW1, dgFfnB1)) =
-              backwardP linearP (bpFfnW1 p, bpFfnB1 p) attnNorm dFfnHidden
+              primBackward linearP (bpFfnW1 p, bpFfnB1 p) attnNorm dFfnHidden
             dAttnNorm = dFfnRes + dAttnNorm1
             -- Backward through attn LN
             (dPostAttn, (dgAttnGamma, dgAttnBeta)) =
-              backwardP (layerNormP eps) (bpAttnLnGamma p, bpAttnLnBeta p) postAttn dAttnNorm
+              primBackward (layerNormP eps) (bpAttnLnGamma p, bpAttnLnBeta p) postAttn dAttnNorm
             -- Backward through attn residual: dPostAttn splits to x and attnOut
             (dXfromAttn, (dgWq, dgWk, dgWv, dgWo)) =
-              backwardP
+              primBackward
                 (multiHeadAttentionP nHead seqLen eps mask)
                 (bpAttnWq p, bpAttnWk p, bpAttnWv p, bpAttnWo p)
                 x
@@ -428,21 +429,21 @@ bodyDiffP ::
   (Int -> Int -> Double -> DiffP BlockParams (Matrix Double) (Matrix Double)) ->
   DiffP GptParams (Matrix Double) (Matrix Double)
 bodyDiffP cfg seqLen eps blockCtor =
-  DiffP
-    { forwardP = \p x ->
+  TensorPrim
+    { primForward = \p x ->
         let xBlocks = foldl' applyBlock x (gpBlocks p)
             xFinalNorm = layerNormF xBlocks (gpLnGamma p) (gpLnBeta p) eps
          in xFinalNorm LA.<> gpHead p + broadcastBias (gpHeadB p) seqLen,
-      backwardP = \p x dy ->
+      primBackward = \p x dy ->
         let fwdStack = foldl' (\acc bp -> acc ++ [applyBlock (last acc) bp]) [x] (gpBlocks p)
             xBlocks = last fwdStack
             xFinalNorm = layerNormF xBlocks (gpLnGamma p) (gpLnBeta p) eps
             -- Backward through output projection
             (gradXFinalNorm, (gHead, gHeadB)) =
-              backwardP linearP (gpHead p, gpHeadB p) xFinalNorm dy
+              primBackward linearP (gpHead p, gpHeadB p) xFinalNorm dy
             -- Backward through final layer norm
             (gradXBlocks, (gLnGamma, gLnBeta)) =
-              backwardP (layerNormP eps) (gpLnGamma p, gpLnBeta p) xBlocks gradXFinalNorm
+              primBackward (layerNormP eps) (gpLnGamma p, gpLnBeta p) xBlocks gradXFinalNorm
             -- Backward through blocks
             (gradX0, blockGradsRev) =
               goBwd gradXBlocks (reverse (gpBlocks p)) (tail (reverse fwdStack))
@@ -459,10 +460,10 @@ bodyDiffP cfg seqLen eps blockCtor =
   where
     nHead = gptNHead cfg
     blockP = blockCtor nHead seqLen eps
-    applyBlock xIn bp = forwardP blockP bp xIn
+    applyBlock xIn bp = primForward blockP bp xIn
     goBwd gradX [] _ = (gradX, [])
     goBwd gradX (bp : bps') (xPrev : xs) =
-      let (dx, dbp) = backwardP blockP bp xPrev gradX
+      let (dx, dbp) = primBackward blockP bp xPrev gradX
           (dxFinal, dbps) = goBwd dx bps' xs
        in (dxFinal, dbp : dbps)
     goBwd _ _ _ = error "bodyDiffP: mismatched block stack"

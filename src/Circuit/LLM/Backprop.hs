@@ -26,11 +26,13 @@ where
 
 import Circuit.LLM.Diff
   ( BlockParams (..),
-    DiffP (..),
+    DiffP,
     GptParams (..),
     bertDiffP,
     gptDiffP,
     gptParamsFromModel,
+    primBackward,
+    primForward,
     subMatrixW,
     zeroMatrix,
   )
@@ -349,13 +351,13 @@ gptBackward cfg model inputIds targetIds =
       -- Run the differentiable GPT body
       gptP = gptDiffP cfg seqLen eps
       params = gptParamsFromModel model
-      logits = forwardP gptP params x0
+      logits = primForward gptP params x0
 
       -- Loss and output gradient
       (loss, gradLogits) = crossEntropyBwd logits targetIds
 
       -- Backward through the whole GPT body
-      (gradX0, gp) = backwardP gptP params x0 gradLogits
+      (gradX0, gp) = primBackward gptP params x0 gradLogits
 
       -- Embedding gradients
       gWte = embedBackward wte inputIds gradX0
@@ -393,13 +395,13 @@ bertBackward cfg model inputIds targetIds mask =
       -- Run the differentiable bidirectional body
       bertP = bertDiffP cfg seqLen eps
       params = gptParamsFromModel model
-      logits = forwardP bertP params x0
+      logits = primForward bertP params x0
 
       -- Masked loss and output gradient
       (loss, gradLogits) = maskedCrossEntropyBwd logits targetIds mask
 
       -- Backward through the whole BERT body
-      (gradX0, gp) = backwardP bertP params x0 gradLogits
+      (gradX0, gp) = primBackward bertP params x0 gradLogits
 
       -- Embedding gradients
       gWte = embedBackward wte inputIds gradX0
