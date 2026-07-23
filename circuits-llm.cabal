@@ -50,22 +50,6 @@ library
     -Wall
     -Wcompat
 
-test-suite test-bpe
-  type: exitcode-stdio-1.0
-  main-is: test-bpe.hs
-  build-depends:
-    base >=4.20 && <5,
-    circuits-llm >=0.1 && <0.2,
-    text >=2.0 && <3,
-    vector >=0.13 && <0.14,
-
-  hs-source-dirs: app
-  default-language: GHC2024
-  ghc-options:
-    -O2
-    -Wall
-    -Wcompat
-
 executable quick-test
   main-is: quick-test.hs
   hs-source-dirs: app

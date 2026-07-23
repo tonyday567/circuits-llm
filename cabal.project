@@ -6,7 +6,6 @@ packages:
   ../numhask-diff/numhask-diff.cabal
   ../harpie/harpie.cabal
   ../harpie-numhask/harpie-numhask.cabal
-  ../../other/ad-delcont/ad-delcont.cabal
 
 constraints:
   circuits >= 0.2,
@@ -15,7 +14,6 @@ constraints:
 write-ghc-environment-files: always
 
 allow-newer:
-  ad-delcont:base,
   harpie-numhask:harpie
 
 package recursion-schemes

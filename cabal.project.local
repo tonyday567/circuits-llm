@@ -8,5 +8,4 @@ packages:
   ../numhask-diff/numhask-diff.cabal
   ../harpie/harpie.cabal
   ../harpie-numhask/harpie-numhask.cabal
-  ../../other/ad-delcont/ad-delcont.cabal
   ../circuits-meter/circuits-meter.cabal
