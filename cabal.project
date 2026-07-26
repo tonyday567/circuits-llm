@@ -14,9 +14,6 @@ constraints:
 
 write-ghc-environment-files: always
 
-allow-newer:
-  harpie-numhask:harpie
-
 package recursion-schemes
   flags: -template-haskell
 

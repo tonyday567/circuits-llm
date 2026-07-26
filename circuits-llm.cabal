@@ -80,8 +80,8 @@ executable bench
     -O2
     -rtsopts
 
-executable test-attn
-  main-is: test-attn.hs
+executable smoke-attn
+  main-is: smoke-attn.hs
   hs-source-dirs: app
   build-depends:
     base >=4.20 && <5,
@@ -114,8 +114,8 @@ executable debug-attn
   default-language: GHC2024
   ghc-options: -O2
 
-executable test-backprop-full
-  main-is: test-backprop-full.hs
+executable smoke-backprop-full
+  main-is: smoke-backprop-full.hs
   hs-source-dirs: app
   build-depends:
     base >=4.20 && <5,
@@ -125,8 +125,8 @@ executable test-backprop-full
   default-language: GHC2024
   ghc-options: -O2 -rtsopts
 
-executable test-backprop
-  main-is: test-backprop.hs
+executable smoke-backprop
+  main-is: smoke-backprop.hs
   hs-source-dirs: app
   build-depends:
     base >=4.20 && <5,
@@ -136,8 +136,8 @@ executable test-backprop
   default-language: GHC2024
   ghc-options: -O2 -rtsopts
 
-executable test-training-full
-  main-is: test-training-full.hs
+executable smoke-training-full
+  main-is: smoke-training-full.hs
   hs-source-dirs: app
   build-depends:
     base >=4.20 && <5,
@@ -147,8 +147,8 @@ executable test-training-full
   default-language: GHC2024
   ghc-options: -O2 -rtsopts
 
-executable test-bert
-  main-is: test-bert.hs
+executable smoke-bert
+  main-is: smoke-bert.hs
   hs-source-dirs: app
   build-depends:
     base >=4.20 && <5,
@@ -158,8 +158,8 @@ executable test-bert
   default-language: GHC2024
   ghc-options: -O2 -rtsopts
 
-executable test-training
-  main-is: test-training.hs
+executable smoke-training
+  main-is: smoke-training.hs
   hs-source-dirs: app
   build-depends:
     base >=4.20 && <5,
@@ -169,8 +169,8 @@ executable test-training
   default-language: GHC2024
   ghc-options: -O2 -rtsopts
 
-executable test-inference
-  main-is: test-inference.hs
+executable smoke-inference
+  main-is: smoke-inference.hs
   hs-source-dirs: app
   build-depends:
     base >=4.20 && <5,
@@ -180,8 +180,8 @@ executable test-inference
   default-language: GHC2024
   ghc-options: -O2 -rtsopts
 
-executable test-weights
-  main-is: test-weights.hs
+executable smoke-weights
+  main-is: smoke-weights.hs
   hs-source-dirs: app
   build-depends:
     base >=4.20 && <5,
@@ -202,8 +202,8 @@ executable bench-hmatrix
   default-language: GHC2024
   ghc-options: -O2
 
-executable test-gpt
-  main-is: test-gpt.hs
+executable smoke-gpt
+  main-is: smoke-gpt.hs
   hs-source-dirs: app
   build-depends:
     base >=4.20 && <5,
