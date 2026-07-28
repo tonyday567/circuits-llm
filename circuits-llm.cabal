@@ -23,6 +23,7 @@ library
     Circuit.LLM.BPE
     Circuit.LLM.Attention
     Circuit.LLM.GPT
+    Circuit.LLM.Mixer
     Circuit.LLM.Weights
     Circuit.LLM.Inference
     Circuit.LLM.Training
@@ -88,6 +89,17 @@ executable smoke-attn
     circuits-llm >=0.1 && <0.2,
     harpie >=0.2 && <0.4,
     vector >=0.13 && <0.14,
+
+  default-language: GHC2024
+  ghc-options: -O2
+
+executable smoke-mixer
+  main-is: smoke-mixer.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits-llm >=0.1 && <0.2,
+    hmatrix >=0.20 && <0.21,
 
   default-language: GHC2024
   ghc-options: -O2
