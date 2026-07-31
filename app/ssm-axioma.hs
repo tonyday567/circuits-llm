@@ -1,10 +1,11 @@
 module Main where
 
+import Circuit.LLM.Attention (causalMask, multiHeadAttention)
 import Circuit.LLM.SSM
 import Circuit.Process (scan)
-import Data.List (foldl')
-import Data.Foldable (toList)
-import Harpie.Array (Array, array, zipWith, (!))
+import Data.List (foldl', scanl')
+import Data.Vector.Unboxed qualified as V
+import Harpie.Array (Array, array, mult, shape, zipWith, (!))
 import Prelude hiding (zipWith)
 
 approx :: Double -> Double -> Bool
@@ -19,6 +20,10 @@ check name ok = do
   putStrLn $ (if ok then "PASS " else "FAIL ") ++ name
   pure ok
 
+-- | Hand-rolled EWMA for exact oracle comparison.
+ewmaHand :: Double -> [Double] -> [Double]
+ewmaHand alpha = tail . scanl' (\h x -> alpha * x + (1 - alpha) * h) 0
+
 main :: IO ()
 main = do
   let ewmaAsAff alpha x = Aff (1 - alpha) (alpha * x)
@@ -29,6 +34,34 @@ main = do
         [ AffVec (array [3] [0.5, 0.5, 0.5]) (array [3] [1, 2, 3]),
           AffVec (array [3] [0.5, 0.5, 0.5]) (array [3] [4, 5, 6])
         ]
+      -- Toy data for SSM vs attention coexistence demo.
+      seqLen = 4
+      nEmbd = 6
+      nHead = 2
+      headDim = nEmbd `div` nHead
+      -- Input: [seqLen, nEmbd]
+      embed = array [seqLen, nEmbd] $
+        [0.1, 0.2, 0.3, 0.4, 0.5, 0.6] ++
+        [0.2, 0.3, 0.4, 0.5, 0.6, 0.7] ++
+        [0.3, 0.4, 0.5, 0.6, 0.7, 0.8] ++
+        [0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+      -- Identity-ish weight matrices for attention.
+      wEye = array [nEmbd, nEmbd] $
+        [ if i == j then 1.0 else 0.0
+        | i <- [0 .. nEmbd - 1]
+        , j <- [0 .. nEmbd - 1]
+        ]
+      mask4 = causalMask seqLen
+      -- SSM layer: fixed diagonal A, B = input embedding row.
+      ssmA = array [nEmbd] (replicate nEmbd 0.5)
+      ssmH0 = array [nEmbd] (replicate nEmbd 0.0)
+      -- Convert each row of embed to an AffVec.
+      toRows :: Array Double -> [Array Double]
+      toRows x =
+        let [n, d] = V.toList (shape x)
+         in [ array [d] [x ! [r, c] | c <- [0 .. d - 1]] | r <- [0 .. n - 1] ]
+      embedRows = toRows embed
+      affVecs = [AffVec ssmA row | row <- embedRows]
   results <-
     sequence
       [ check "SSM affComp doctest matches" $
@@ -36,6 +69,18 @@ main = do
            in approx a 10 && approx b 22,
         check "SSM sequential scan matches hand" $
           seqSSM 0 [Aff 1 1, Aff 1 2, Aff 1 3] == [1, 3, 6],
+        check "SSM ewma 1x1 equals hand EWMA (exact)" $
+          let alpha = 0.6
+              inputs = [1 .. 10] :: [Double]
+              ssmResult = seqSSM 0 [Aff (1 - alpha) (alpha * x) | x <- inputs]
+              ewmaResult = ewmaHand alpha inputs
+           in and [approx x y | (x, y) <- zip ssmResult ewmaResult],
+        check "SSM ewma 1x1 equals hand EWMA (alpha=0.2)" $
+          let alpha = 0.2
+              inputs = [5, -3, 8, 2] :: [Double]
+              ssmResult = seqSSM 0 [Aff (1 - alpha) (alpha * x) | x <- inputs]
+              ewmaResult = ewmaHand alpha inputs
+           in and [approx x y | (x, y) <- zip ssmResult ewmaResult],
         check "SSM associative scan equals sequential scan (constant A)" $
           let seqResult = seqSSM 0 ewmaSteps
               assocResult = assocSSM 0 ewmaSteps
@@ -71,7 +116,18 @@ main = do
         check "SSM System scan equals sequential scan" $
           let (sysResult, _sF) = runSystem ssmSystemVec h0v vsteps
               seqResult = seqSSMVec h0v vsteps
-           in and [approxArray x y | (x, y) <- zip sysResult seqResult]
+           in and [approxArray x y | (x, y) <- zip sysResult seqResult],
+        check "SSM vs attention: same-shape output on shared embed" $
+          let ssmOut = seqSSMVec ssmH0 affVecs
+              attnOut =
+                multiHeadAttention nHead embed wEye wEye wEye wEye mask4
+              -- SSM: one output per step; attention: one output for full sequence
+              ssmRows = length ssmOut
+              [attnRows, attnCols] = V.toList (shape attnOut)
+           in ssmRows == seqLen
+                && attnRows == seqLen
+                && attnCols == nEmbd
+                && length ssmOut == length affVecs
       ]
   if and results
     then putStrLn "\nAll tests passed."
