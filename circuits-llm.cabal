@@ -24,6 +24,7 @@ library
     Circuit.LLM.Attention
     Circuit.LLM.GPT
     Circuit.LLM.Mixer
+    Circuit.LLM.SSM
     Circuit.LLM.Weights
     Circuit.LLM.Inference
     Circuit.LLM.Training
@@ -35,6 +36,7 @@ library
   build-depends:
     base >=4.20 && <5,
     bytestring >=0.11 && <0.13,
+    circuits >=0.2 && <0.4,
     circuits-ad >=0.1 && <0.2,
     containers >=0.6 && <0.9,
     harpie >=0.2 && <0.4,
@@ -225,3 +227,16 @@ executable smoke-gpt
 
   default-language: GHC2024
   ghc-options: -O2 -rtsopts
+
+
+executable circuits-llm-ssm-axioma
+  main-is: ssm-axioma.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.20 && <5,
+    circuits >=0.2 && <0.4,
+    circuits-llm >=0.1 && <0.2,
+    harpie >=0.2 && <0.4,
+
+  default-language: GHC2024
+  ghc-options: -O2
