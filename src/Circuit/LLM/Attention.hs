@@ -32,10 +32,12 @@ import Harpie.Array
     zipWith,
   )
 import Harpie.Array qualified as H (imap)
+import NumHask.Algebra.Additive (Additive)
+import NumHask.Algebra.Multiplicative (Multiplicative)
 import Prelude hiding (drop, maximum, sum, take, zipWith)
 
 -- | Numerically stable softmax along dimension 0 (row-wise).
-softmax :: (Floating a, Ord a) => Array a -> Array a
+softmax :: (Floating a, Ord a, Additive a, Multiplicative a) => Array a -> Array a
 softmax x =
   let rowMaxes = reduces [0] maximum x
       expandedMax = expand const rowMaxes (array [nCols] unitVals)
@@ -49,7 +51,7 @@ softmax x =
 
 -- | Scaled dot-product attention.
 scaledDotProductAttention ::
-  (Floating a, Ord a) =>
+  (Floating a, Ord a, Additive a, Multiplicative a) =>
   Array a -> Array a -> Array a -> Array a -> Array a
 scaledDotProductAttention q k v mask =
   let dk = fromIntegral (last (V.toList (shape k))) :: Double
@@ -82,7 +84,7 @@ mergeHeads x =
 -- | Multi-head self-attention. Projects x directly with per-head weight slices
 -- to avoid deep backpermute chains.
 multiHeadAttention ::
-  (Floating a, Ord a) =>
+  (Floating a, Ord a, Additive a, Multiplicative a) =>
   Int -> Array a -> Array a -> Array a -> Array a -> Array a -> Array a -> Array a
 multiHeadAttention nHead x wQ wK wV wO mask =
   let [seqLen, nEmbd] = V.toList (shape x)

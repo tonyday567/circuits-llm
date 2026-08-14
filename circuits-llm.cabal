@@ -36,11 +36,12 @@ library
   build-depends:
     base >=4.20 && <5,
     bytestring >=0.11 && <0.13,
-    circuits >=0.2 && <0.4,
+    circuits >=0.2 && <0.5,
     circuits-ad >=0.1 && <0.2,
     containers >=0.6 && <0.9,
     harpie >=0.2 && <0.4,
     hmatrix >=0.20 && <0.21,
+    numhask >=0.14 && <0.15,
     random >=1.2 && <1.3,
     text >=2.0 && <3,
     vector >=0.13 && <0.14,
@@ -234,7 +235,7 @@ executable circuits-llm-ssm-axioma
   hs-source-dirs: app
   build-depends:
     base >=4.20 && <5,
-    circuits >=0.2 && <0.4,
+    circuits >=0.2 && <0.5,
     circuits-llm >=0.1 && <0.2,
     harpie >=0.2 && <0.4,
     vector >=0.13 && <0.14,

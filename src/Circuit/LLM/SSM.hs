@@ -14,6 +14,7 @@ module Circuit.LLM.SSM
     seqSSM,
     assocScan,
     assocSSM,
+    chunkedScan,
 
     -- * Vector (harpie) affine SSM
     AffVec (..),
@@ -26,14 +27,25 @@ module Circuit.LLM.SSM
     runSystem,
     ssmSystemVec,
 
-    -- * Process view
+    -- * Multi-head System view (Dirichlet tensor)
+    multiHeadSSMSystem,
+    runMultiHeadSSMSystem,
+    runSharedInputMultiHeadSSMSystem,
+
+    -- * Process / System view
     ssmProcess,
+    ssmSystem,
+
+    -- * Centrality pair (multi-head coupling)
+    coupledMultiHeadSSMSystem,
   )
 where
 
-import Circuit.Poly (Mono, System (..), monoDir, monoIn)
-import Circuit.Process (Process (..))
-import Data.List (foldl', scanl')
+import Circuit.Poly (Mono, Poly (Tensor), System, SystemT (..), monoDir, monoIn, mooreSystem, system)
+import Circuit.Process (Process (..), systemToProcess)
+import Circuit.Thread (Thread (..))
+import Data.List (foldl', foldl1', scanl')
+import Data.Void (absurd)
 import Harpie.Array (Array, array, zipWith)
 import Prelude hiding (zipWith)
 
@@ -74,18 +86,49 @@ assocScan affs = case scanl' (flip affComp) (Aff 1 0) affs of
   (_ : comps) -> comps
   [] -> []
 
+-- | Tree-shaped associative scan with a given chunk size.
+--
+-- Each chunk is reduced to a summary affine function, the summaries are
+-- prefix-composed, and the result is expanded back to a per-step prefix.  If
+-- 'affComp' is associative, this must agree with 'assocScan' for every chunk
+-- size.  This is the genuine parallelisation principle behind S4 / Mamba /
+-- linear attention.
+chunkedScan :: Int -> [Aff] -> [Aff]
+chunkedScan _ [] = []
+chunkedScan k affs
+  | k <= 1 = assocScan affs
+  | otherwise =
+      let chunks = chunksOf k affs
+          summaries = map (foldl1' (flip affComp)) chunks
+          summaryPrefixes = assocScan summaries
+          expand chunk prevPref =
+            let inner = tail (scanl' (flip affComp) (Aff 1 0) chunk)
+             in map (\x -> affComp x prevPref) inner
+       in concat [expand chunk prevPref | (chunk, prevPref) <- zip chunks (Aff 1 0 : summaryPrefixes)]
+  where
+    chunksOf _ [] = []
+    chunksOf n xs = take n xs : chunksOf n (drop n xs)
+
 -- | Apply the associatively-scanned affine functions to an initial state.
 assocSSM :: Double -> [Aff] -> [Double]
 assocSSM h0 = map (\(Aff a b) -> a * h0 + b) . assocScan
 
--- | A 'Process' whose state is the hidden state @h@ and whose output is @h@.
--- Input is the affine coefficient pair @(a_t, b_t)@.
-ssmProcess :: Process Aff Double
-ssmProcess = Process inject step extract
+-- | A 'System' whose state is the hidden state @h@ and whose output is @h@.
+-- Input is the affine coefficient pair @(a_t, b_t)@; the initial state @h0@ is
+-- supplied when converting to a 'Process' or running directly.
+ssmSystem :: System (->) Double (Mono Aff Double)
+ssmSystem = mooreSystem step extract
   where
-    inject (Aff a b) = a * 0 + b
     step h (Aff a b) = a * h + b
     extract h = h
+
+-- | A 'Process' whose state is the hidden state @h@ and whose output is @h@.
+-- Input is the affine coefficient pair @(a_t, b_t)@.
+--
+-- This is the first-input-seeded presentation with @h0 = 0@.  Use
+-- 'ssmSystem' with 'systemToProcess' when you need a non-zero seed.
+ssmProcess :: Process Aff Double
+ssmProcess = systemToProcess 0 id ssmSystem
 
 
 -- ---------------------------------------------------------------------------
@@ -139,7 +182,7 @@ assocSSMVec h0 = map (\(AffVec a b) -> zipWith (+) (zipWith (*) a h0) b) . assoc
 -- inputs.  This is the same semantics as 'Circuit.Process.scan', but stated
 -- directly on 'System'.
 runSystem :: System (->) s (Mono i o) -> s -> [i] -> ([o], s)
-runSystem (System sys) s0 is = go s0 is []
+runSystem (SystemT (Thread sys)) s0 is = go s0 is []
   where
     go s [] acc = (reverse acc, s)
     go s (i : iss) acc =
@@ -149,7 +192,81 @@ runSystem (System sys) s0 is = go s0 is []
 -- | Vector SSM as a 'System (->)' with harpie state, input 'AffVec', and full
 -- state observation.
 ssmSystemVec :: System (->) (Array Double) (Mono AffVec (Array Double))
-ssmSystemVec = System $ \(h, d) ->
+ssmSystemVec = system $ \(h, d) ->
   let AffVec a b = monoDir d
       h' = zipWith (+) (zipWith (*) a h) b
    in (h', (h', ()))
+
+-- ---------------------------------------------------------------------------
+-- Multi-head SSM as a Tensor-polynomial System
+-- ---------------------------------------------------------------------------
+
+-- | Two independent vector SSM heads packaged as a single 'System' over the
+-- Dirichlet tensor @Tensor (Mono AffVec (Array Double)) (Mono AffVec (Array Double))@.
+--
+-- The two heads share the same input /direction type/ ('AffVec') but receive
+-- independent direction values.  This is the right polynomial for parallel
+-- layers: both heads fire on the same tick, each with its own input.  A
+-- cartesian 'Prod' would force a choice between heads via @Either@ directions.
+multiHeadSSMSystem ::
+  System
+    (->)
+    (Array Double, Array Double)
+    (Tensor (Mono AffVec (Array Double)) (Mono AffVec (Array Double)))
+multiHeadSSMSystem = system $ \case
+  ((h1, h2), (Right aff1, Right aff2)) ->
+    let AffVec a1 b1 = aff1
+        AffVec a2 b2 = aff2
+        h1' = zipWith (+) (zipWith (*) a1 h1) b1
+        h2' = zipWith (+) (zipWith (*) a2 h2) b2
+     in ((h1', h2'), ((h1', ()), (h2', ())))
+  (_, (Left v, _)) -> absurd v
+  (_, (_, Left v)) -> absurd v
+
+-- | Run the multi-head SSM with independent per-head inputs.
+--
+-- Returns the pair of head outputs at each step and the final pair of states.
+runMultiHeadSSMSystem ::
+  (Array Double, Array Double) ->
+  [(AffVec, AffVec)] ->
+  ([(Array Double, Array Double)], (Array Double, Array Double))
+runMultiHeadSSMSystem s0 affPairs =
+  let SystemT (Thread f) = multiHeadSSMSystem
+      go s [] acc = (reverse acc, s)
+      go (h1, h2) ((aff1, aff2) : affs') acc =
+        let ((h1', h2'), ((o1, ()), (o2, ()))) = f ((h1, h2), (monoIn aff1, monoIn aff2))
+         in go (h1', h2') affs' ((o1, o2) : acc)
+   in go s0 affPairs []
+
+-- | Run the multi-head SSM with the /same/ input supplied to both heads.
+--
+-- This is the diagonal shared-input case; building it from independent inputs
+-- requires an explicit copy of the input direction.
+runSharedInputMultiHeadSSMSystem ::
+  (Array Double, Array Double) ->
+  [AffVec] ->
+  ([(Array Double, Array Double)], (Array Double, Array Double))
+runSharedInputMultiHeadSSMSystem s0 affs = runMultiHeadSSMSystem s0 [(aff, aff) | aff <- affs]
+
+-- | Two-headed SSM with a cross-head coupling: head 1 reads head 2's state.
+--
+-- This breaks premonoidal centrality: the order in which the two heads are
+-- threaded through the shared medium matters, because head 1's update depends
+-- on head 2's state.  It is the "flip" oracle for the multi-head centrality
+-- pair.
+coupledMultiHeadSSMSystem ::
+  System
+    (->)
+    (Array Double, Array Double)
+    (Tensor (Mono AffVec (Array Double)) (Mono AffVec (Array Double)))
+coupledMultiHeadSSMSystem = system $ \case
+  ((h1, h2), (Right aff1, Right aff2)) ->
+    let AffVec a1 b1 = aff1
+        AffVec a2 b2 = aff2
+        -- Head 1 receives a cross-term from head 2's state.
+        cross = zipWith (*) h2 (zipWith (\_ _ -> 0.1) h2 h2)
+        h1' = zipWith (+) (zipWith (+) (zipWith (*) a1 h1) b1) cross
+        h2' = zipWith (+) (zipWith (*) a2 h2) b2
+     in ((h1', h2'), ((h1', ()), (h2', ())))
+  (_, (Left v, _)) -> absurd v
+  (_, (_, Left v)) -> absurd v
