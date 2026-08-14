@@ -37,7 +37,7 @@ library
     base >=4.20 && <5,
     bytestring >=0.11 && <0.13,
     circuits >=0.2 && <0.5,
-    circuits-ad >=0.1 && <0.2,
+    circuits-diff >=0.1 && <0.2,
     containers >=0.6 && <0.9,
     harpie >=0.2 && <0.4,
     hmatrix >=0.20 && <0.21,

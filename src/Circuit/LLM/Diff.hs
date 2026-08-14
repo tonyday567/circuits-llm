@@ -52,8 +52,8 @@ module Circuit.LLM.Diff
   )
 where
 
-import Circuit.AD.Param (TensorPrim (..))
-import Circuit.AD.Param qualified as ADP
+import Circuit.Diff.Param (TensorPrim (..))
+import Circuit.Diff.Param qualified as ADP
 import Circuit.LLM.GPT (FeedForward (..), Gpt (..), GptConfig (..), TransformerBlock (..))
 import Data.List (foldl1')
 import Numeric.LinearAlgebra
@@ -85,7 +85,7 @@ import Numeric.LinearAlgebra qualified as LA
 -- Running forward produces the output.  The backward pass, given the output
 -- cotangent, produces the input cotangent and parameter gradients.
 --
--- This is exactly the same shape as 'Circuit.AD.Param.TensorPrim' from
+-- This is exactly the same shape as 'Circuit.Diff.Param.TensorPrim' from
 -- circuits-ad; we use a local type synonym so the rest of the module keeps
 -- its paired-parameter composition style.
 type DiffP = TensorPrim
