@@ -11,6 +11,7 @@ description:
   language models, using the circuits ecosystem and hmatrix for linear
   algebra.  Includes byte-pair encoding, attention, GPT-2-shaped
   forward/backward passes, and AdamW training loops.
+
 build-type: Simple
 tested-with: ghc ==9.14.1
 
@@ -20,15 +21,15 @@ source-repository head
 
 library
   exposed-modules:
-    Circuit.LLM.BPE
     Circuit.LLM.Attention
+    Circuit.LLM.Backprop
+    Circuit.LLM.BPE
     Circuit.LLM.GPT
+    Circuit.LLM.Inference
     Circuit.LLM.Mixer
     Circuit.LLM.SSM
-    Circuit.LLM.Weights
-    Circuit.LLM.Inference
     Circuit.LLM.Training
-    Circuit.LLM.Backprop
+    Circuit.LLM.Weights
 
   other-modules:
     Circuit.LLM.Diff
@@ -116,7 +117,9 @@ executable bench-attn
     harpie >=0.2 && <0.4,
 
   default-language: GHC2024
-  ghc-options: -O2 -rtsopts
+  ghc-options:
+    -O2
+    -rtsopts
 
 executable debug-attn
   main-is: debug-attn.hs
@@ -138,7 +141,9 @@ executable smoke-backprop-full
     hmatrix >=0.20 && <0.21,
 
   default-language: GHC2024
-  ghc-options: -O2 -rtsopts
+  ghc-options:
+    -O2
+    -rtsopts
 
 executable smoke-backprop
   main-is: smoke-backprop.hs
@@ -149,7 +154,9 @@ executable smoke-backprop
     hmatrix >=0.20 && <0.21,
 
   default-language: GHC2024
-  ghc-options: -O2 -rtsopts
+  ghc-options:
+    -O2
+    -rtsopts
 
 executable smoke-training-full
   main-is: smoke-training-full.hs
@@ -160,7 +167,9 @@ executable smoke-training-full
     hmatrix >=0.20 && <0.21,
 
   default-language: GHC2024
-  ghc-options: -O2 -rtsopts
+  ghc-options:
+    -O2
+    -rtsopts
 
 executable smoke-bert
   main-is: smoke-bert.hs
@@ -171,7 +180,9 @@ executable smoke-bert
     hmatrix >=0.20 && <0.21,
 
   default-language: GHC2024
-  ghc-options: -O2 -rtsopts
+  ghc-options:
+    -O2
+    -rtsopts
 
 executable smoke-training
   main-is: smoke-training.hs
@@ -182,7 +193,9 @@ executable smoke-training
     hmatrix >=0.20 && <0.21,
 
   default-language: GHC2024
-  ghc-options: -O2 -rtsopts
+  ghc-options:
+    -O2
+    -rtsopts
 
 executable smoke-inference
   main-is: smoke-inference.hs
@@ -193,7 +206,9 @@ executable smoke-inference
     hmatrix >=0.20 && <0.21,
 
   default-language: GHC2024
-  ghc-options: -O2 -rtsopts
+  ghc-options:
+    -O2
+    -rtsopts
 
 executable smoke-weights
   main-is: smoke-weights.hs
@@ -204,7 +219,9 @@ executable smoke-weights
     hmatrix >=0.20 && <0.21,
 
   default-language: GHC2024
-  ghc-options: -O2 -rtsopts
+  ghc-options:
+    -O2
+    -rtsopts
 
 executable bench-hmatrix
   main-is: bench-hmatrix.hs
@@ -227,8 +244,9 @@ executable smoke-gpt
     hmatrix >=0.20 && <0.21,
 
   default-language: GHC2024
-  ghc-options: -O2 -rtsopts
-
+  ghc-options:
+    -O2
+    -rtsopts
 
 executable circuits-llm-ssm-axioma
   main-is: ssm-axioma.hs
