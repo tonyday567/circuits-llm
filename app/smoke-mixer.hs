@@ -15,8 +15,8 @@ import Numeric.LinearAlgebra
     sumElements,
     toList,
     tr,
-    (><),
     (<>),
+    (><),
   )
 import Numeric.LinearAlgebra qualified as LA
 import System.Exit (exitFailure)

@@ -22,14 +22,14 @@ import Circuit.LLM.SSM
     ssmSystem,
     ssmSystemVec,
   )
-import Circuit.Process (scan, systemToProcess)
 import Circuit.Poly (SystemT (..), monoIn)
+import Circuit.Process (scan, systemToProcess)
 import Circuit.Thread (Thread (..))
-import Prelude qualified
 import Data.List (foldl', scanl')
 import Data.Vector.Unboxed qualified as V
 import Harpie.Array (Array, array, mult, shape, zipWith, (!))
 import Prelude hiding (zipWith)
+import Prelude qualified
 
 approx :: Double -> Double -> Bool
 approx x y = abs (x - y) < 1e-9
@@ -77,7 +77,7 @@ convolve :: [Double] -> [Double] -> [Double]
 convolve xs ys =
   let n = min (Prelude.length xs) (Prelude.length ys)
    in [ sum (Prelude.zipWith (*) (Prelude.take (i + 1) xs) (reverse (Prelude.take (i + 1) ys)))
-        | i <- [0 .. n - 1]
+      | i <- [0 .. n - 1]
       ]
 
 -- ---------------------------------------------------------------------------
@@ -148,17 +148,19 @@ main = do
       nHead = 2
       headDim = nEmbd `div` nHead
       -- Input: [seqLen, nEmbd]
-      embed = array [seqLen, nEmbd] $
-        [0.1, 0.2, 0.3, 0.4, 0.5, 0.6] ++
-        [0.2, 0.3, 0.4, 0.5, 0.6, 0.7] ++
-        [0.3, 0.4, 0.5, 0.6, 0.7, 0.8] ++
-        [0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+      embed =
+        array [seqLen, nEmbd] $
+          [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+            ++ [0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+            ++ [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+            ++ [0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
       -- Identity-ish weight matrices for attention.
-      wEye = array [nEmbd, nEmbd] $
-        [ if i == j then 1.0 else 0.0
-        | i <- [0 .. nEmbd - 1]
-        , j <- [0 .. nEmbd - 1]
-        ]
+      wEye =
+        array [nEmbd, nEmbd] $
+          [ if i == j then 1.0 else 0.0
+          | i <- [0 .. nEmbd - 1],
+            j <- [0 .. nEmbd - 1]
+          ]
       mask4 = causalMask seqLen
       -- SSM layer: fixed diagonal A, B = input embedding row.
       ssmA = array [nEmbd] (replicate nEmbd 0.5)
@@ -167,7 +169,7 @@ main = do
       toRows :: Array Double -> [Array Double]
       toRows x =
         let [n, d] = V.toList (shape x)
-         in [ array [d] [x ! [r, c] | c <- [0 .. d - 1]] | r <- [0 .. n - 1] ]
+         in [array [d] [x ! [r, c] | c <- [0 .. d - 1]] | r <- [0 .. n - 1]]
       embedRows = toRows embed
       affVecs = [AffVec ssmA row | row <- embedRows]
   results <-
@@ -208,7 +210,7 @@ main = do
               chunkSizes = [1 .. length nonCommSteps + 1]
            in and
                 [ all (uncurry approxAff) (zip (chunkedScan k nonCommSteps) expected)
-                  | k <- chunkSizes
+                | k <- chunkSizes
                 ],
         check "SSM Process scan equals sequential scan" $
           let procResult = scan ssmProcess steps
@@ -266,7 +268,7 @@ main = do
            in length tensorOuts == length head1Steps
                 && and
                   [ approxArray o1 expected1 && approxArray o2 expected2
-                    | ((o1, o2), expected1, expected2) <- zip3 tensorOuts head1Outs head2Outs
+                  | ((o1, o2), expected1, expected2) <- zip3 tensorOuts head1Outs head2Outs
                   ],
         check "SSM shared-input multi-head is diagonal of independent runner" $
           let h0 = array [3] [0, 0, 0]

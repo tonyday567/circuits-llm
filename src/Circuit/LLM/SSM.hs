@@ -130,7 +130,6 @@ ssmSystem = mooreSystem step extract
 ssmProcess :: Process Aff Double
 ssmProcess = systemToProcess 0 id ssmSystem
 
-
 -- ---------------------------------------------------------------------------
 -- Vector (harpie) affine SSM — diagonal-matrix state
 -- ---------------------------------------------------------------------------
@@ -172,7 +171,6 @@ assocScanVec (firstStep : rest) =
 -- | Apply the associatively-scanned vector affine functions to an initial state.
 assocSSMVec :: Array Double -> [AffVec] -> [Array Double]
 assocSSMVec h0 = map (\(AffVec a b) -> zipWith (+) (zipWith (*) a h0) b) . assocScanVec
-
 
 -- ---------------------------------------------------------------------------
 -- System view: linear SSM as a Moore machine

@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Stateful token mixers from the pedagogic GPT-2 → linear → delta ladder
 -- (waterloo_intern worklog / Kimi lineage).
 --
