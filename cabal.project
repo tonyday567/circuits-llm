@@ -1,11 +1,3 @@
-packages:
-  circuits-llm.cabal
-  ../circuits-diff/circuits-diff.cabal
-  ../circuits/circuits.cabal
-  ../circuits-meter/circuits-meter.cabal
-  ../numhask/numhask.cabal
-  ../circuits-diff/circuits-diff.cabal
-  ../harpie/harpie.cabal
-  ../circuits-mat/circuits-mat.cabal
+packages: circuits-llm.cabal
 
 write-ghc-environment-files: always
