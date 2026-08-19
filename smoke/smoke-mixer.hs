@@ -92,7 +92,7 @@ main = do
     let (o, st) = linearAttnPrefill q k v
     assert "linear out rows = T" (rows o == t)
     assert "linear S is d×d" (LA.size (linS st) == (d, d))
-    assert "linear output finite" (all (not . isNaN) (toList (LA.flatten o)))
+    assert "linear output finite" (not (any isNaN (toList (LA.flatten o))))
 
   -------------------------------------------------------------------------
   putStrLn "delta: write then read recovers v (unit key, β=1)"
@@ -124,7 +124,7 @@ main = do
     -- With α=0 each step forgets S before write; final S is only last write —
     -- not equal to pure delta S.
     assert "α=0 state differs from pure delta" (not (nearMat 1e-6 sG0 sDelta))
-    assert "α=0 output finite" (all (not . isNaN) (toList (LA.flatten oG0)))
+    assert "α=0 output finite" (not (any isNaN (toList (LA.flatten oG0))))
 
   -------------------------------------------------------------------------
   putStrLn "KDA-lite: per-channel α=1 matches gated α=1 step"
@@ -167,6 +167,6 @@ main = do
     assert "chunk C=1 ≡ sequential unnormalized linear" (nearMat 1e-8 oC1 seqUnnorm)
     let oC4 = chunkedLinearAttn 4 q k v
     assert "chunk C=4 shape T×d" (LA.size oC4 == (t, d))
-    assert "chunk C=4 finite" (all (not . isNaN) (toList (LA.flatten oC4)))
+    assert "chunk C=4 finite" (not (any isNaN (toList (LA.flatten oC4))))
 
   putStrLn "=== mixer ladder green ==="

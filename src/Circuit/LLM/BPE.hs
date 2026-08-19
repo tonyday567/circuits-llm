@@ -168,7 +168,7 @@ parseSpecialTokens fp lns = do
 -- Returns (merge rules map, max token ID).
 -- Python: idx starts at 256, increments per merge line.
 parseMergeRules :: FilePath -> [Text] -> Int -> IO (Map (Word32, Word32) (Word32, Int), Word32)
-parseMergeRules fp lns specialCount = do
+parseMergeRules fp lns _specialCount = do
   let startIdx = 256 :: Word32 -- Python starts merge tokens at 256
       parseRule (idx, line) = case Text.words line of
         [id1Str, id2Str] -> case (reads (Text.unpack id1Str), reads (Text.unpack id2Str)) of

@@ -112,16 +112,16 @@ loadGpt2 dir sz = loadGpt2With dir (sizeConfig sz)
 
 -- | Load one transformer block's weights.
 loadBlock :: FilePath -> Int -> Int -> Int -> IO TransformerBlock
-loadBlock dir nEmb nHead h = do
+loadBlock dir nEmb _nHead h = do
   let pfx = dir ++ "/h" ++ show h ++ "."
       ffMul = 4
 
   ln1G <- loadVector (pfx ++ "ln1.gamma.f32") nEmb
   ln1B <- loadVector (pfx ++ "ln1.beta.f32") nEmb
   qkvW <- loadMatrix (pfx ++ "attn.qkv.w.f32") nEmb (3 * nEmb)
-  qkvB <- loadVector (pfx ++ "attn.qkv.b.f32") (3 * nEmb)
+  _qkvB <- loadVector (pfx ++ "attn.qkv.b.f32") (3 * nEmb)
   projW <- loadMatrix (pfx ++ "attn.proj.w.f32") nEmb nEmb
-  projB <- loadVector (pfx ++ "attn.proj.b.f32") nEmb
+  _projB <- loadVector (pfx ++ "attn.proj.b.f32") nEmb
   ln2G <- loadVector (pfx ++ "ln2.gamma.f32") nEmb
   ln2B <- loadVector (pfx ++ "ln2.beta.f32") nEmb
   fcW <- loadMatrix (pfx ++ "mlp.fc.w.f32") nEmb (ffMul * nEmb)
@@ -200,10 +200,6 @@ word32ToFloat w = unsafePerformIO $
   alloca $ \(p :: Ptr Word32) -> do
     poke p w
     peek (castPtr p :: Ptr Float)
-
--- | Zero matrix (placeholder).
-zeroMatrix :: Int -> Int -> Matrix Double
-zeroMatrix r c = reshape c $ fromList (replicate (r * c) 0)
 
 -- | Zero vector (placeholder).
 zeroVector :: Int -> Vector Double

@@ -44,9 +44,9 @@ where
 import Circuit.Poly (Mono, Poly (Tensor), System, SystemT (..), monoDir, monoIn, mooreSystem, system)
 import Circuit.Process (Process (..), systemToProcess)
 import Circuit.Thread (Thread (..))
-import Data.List (foldl', foldl1', scanl')
+import Data.List (foldl1', scanl')
 import Data.Void (absurd)
-import Harpie.Array (Array, array, zipWith)
+import Harpie.Array (Array, zipWith)
 import Prelude hiding (zipWith)
 
 -- | An affine function @h -> a * h + b@.
@@ -102,7 +102,7 @@ chunkedScan k affs
           summaries = map (foldl1' (flip affComp)) chunks
           summaryPrefixes = assocScan summaries
           expand chunk prevPref =
-            let inner = tail (scanl' (flip affComp) (Aff 1 0) chunk)
+            let inner = case scanl' (flip affComp) (Aff 1 0) chunk of (_ : xs) -> xs; [] -> []
              in map (\x -> affComp x prevPref) inner
        in concat [expand chunk prevPref | (chunk, prevPref) <- zip chunks (Aff 1 0 : summaryPrefixes)]
   where

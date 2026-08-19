@@ -26,7 +26,6 @@ where
 
 import Circuit.LLM.Diff
   ( BlockParams (..),
-    DiffP,
     GptParams (..),
     bertDiffP,
     gptDiffP,

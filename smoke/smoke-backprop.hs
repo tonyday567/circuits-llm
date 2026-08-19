@@ -36,7 +36,9 @@ main = do
   let scores = fromRows [fromList [1.0, 2.0, 3.0 :: Double]]
       probs = softmaxScores scores
       gradIn = softmaxBwd probs (reshape 3 (fromList (replicate 3 1.0)))
-  putStrLn $ "  probs = " ++ show (toList (head (LA.toRows probs)))
+  case LA.toRows probs of
+    (row : _) -> putStrLn $ "  probs = " ++ show (toList row)
+    [] -> putStrLn "  probs = []"
   putStrLn $ "  grad sum = " ++ show (sumElements gradIn)
   putStrLn $ if abs (sumElements gradIn) < 1e-10 then "  PASS (grad sums to 0)" else "  FAIL"
 

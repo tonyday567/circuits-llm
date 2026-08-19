@@ -20,7 +20,6 @@ import Circuit.LLM.GPT (Gpt, GptConfig, forward)
 import Data.List (sortOn)
 import Data.Ord (Down (..))
 import Data.Text (Text)
-import Data.Text qualified as T
 import Data.Vector.Unboxed qualified as VU
 import Numeric.LinearAlgebra
   ( Matrix,

@@ -46,7 +46,13 @@ softmax x =
       expandedSums = expand const rowSums (array [nCols] unitVals)
    in zipWith (/) xShifted expandedSums
   where
-    [_, nCols] = V.toList (shape x)
+    shapeList = V.toList (shape x)
+    nCols =
+      case shapeList of
+        [_, n] -> n
+        _ ->
+          -- Input is not two-dimensional; not a reachable state for valid use.
+          error "unreachable: softmax expects a 2-D array"
     unitVals = replicate nCols ()
 
 -- | Scaled dot-product attention.
@@ -72,13 +78,25 @@ causalMask n =
 
 splitHeads :: Int -> Array a -> Array a
 splitHeads nHead x =
-  let [seqLen, nEmbd] = V.toList (shape x)
+  let shapeList = V.toList (shape x)
+      (seqLen, nEmbd) =
+        case shapeList of
+          [s, e] -> (s, e)
+          _ ->
+            -- Input is not two-dimensional; not a reachable state for valid use.
+            error "unreachable: splitHeads expects a 2-D array"
       headDim = nEmbd `div` nHead
    in reshape [nHead, seqLen, headDim] (reshape [seqLen, nHead, headDim] x)
 
 mergeHeads :: Array a -> Array a
 mergeHeads x =
-  let [nHead, seqLen, headDim] = V.toList (shape x)
+  let shapeList = V.toList (shape x)
+      (nHead, seqLen, headDim) =
+        case shapeList of
+          [h, s, d] -> (h, s, d)
+          _ ->
+            -- Input is not three-dimensional; not a reachable state for valid use.
+            error "unreachable: mergeHeads expects a 3-D array"
    in reshape [seqLen, nHead * headDim] (reshape [seqLen, nHead, headDim] x)
 
 -- | Multi-head self-attention. Projects x directly with per-head weight slices
@@ -87,7 +105,13 @@ multiHeadAttention ::
   (Floating a, Ord a, Additive a, Multiplicative a) =>
   Int -> Array a -> Array a -> Array a -> Array a -> Array a -> Array a -> Array a
 multiHeadAttention nHead x wQ wK wV wO mask =
-  let [seqLen, nEmbd] = V.toList (shape x)
+  let shapeList = V.toList (shape x)
+      (seqLen, nEmbd) =
+        case shapeList of
+          [s, e] -> (s, e)
+          _ ->
+            -- Input is not two-dimensional; not a reachable state for valid use.
+            error "unreachable: multiHeadAttention expects a 2-D array"
       headDim = nEmbd `div` nHead
 
       -- Project per head: mult x with column slice [n_embd, head_dim] of weights

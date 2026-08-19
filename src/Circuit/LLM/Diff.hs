@@ -445,8 +445,9 @@ bodyDiffP cfg seqLen eps blockCtor =
             (gradXBlocks, (gLnGamma, gLnBeta)) =
               primBackward (layerNormP eps) (gpLnGamma p, gpLnBeta p) xBlocks gradXFinalNorm
             -- Backward through blocks
+            xPrevs = case reverse fwdStack of (_ : xs) -> xs; [] -> []
             (gradX0, blockGradsRev) =
-              goBwd gradXBlocks (reverse (gpBlocks p)) (tail (reverse fwdStack))
+              goBwd gradXBlocks (reverse (gpBlocks p)) xPrevs
          in ( gradX0,
               GptParams
                 { gpBlocks = reverse blockGradsRev,

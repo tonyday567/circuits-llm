@@ -48,7 +48,9 @@ check name ok = do
 
 -- | Hand-rolled EWMA for exact oracle comparison.
 ewmaHand :: Double -> [Double] -> [Double]
-ewmaHand alpha = tail . scanl' (\h x -> alpha * x + (1 - alpha) * h) 0
+ewmaHand alpha xs = case scanl' (\h x -> alpha * x + (1 - alpha) * h) 0 xs of
+  (_ : outs) -> outs
+  [] -> []
 
 -- ---------------------------------------------------------------------------
 -- Constant-A LTI oracles

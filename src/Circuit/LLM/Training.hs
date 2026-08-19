@@ -45,16 +45,11 @@ import Debug.Trace (trace)
 import Numeric.LinearAlgebra
   ( Matrix,
     Vector,
-    cmap,
     cols,
     fromList,
     reshape,
     rows,
-    scale,
-    sumElements,
     toList,
-    toRows,
-    tr,
   )
 import Numeric.LinearAlgebra qualified as LA
 import System.Random (newStdGen, randomRs)
@@ -150,25 +145,21 @@ squareBlockGrads b =
 -- | Apply AdamW updates to all model parameters.
 applyUpdates ::
   Double -> Double -> Double -> GptConfig -> Gpt -> GptGrads -> GptGrads -> Gpt
-applyUpdates lr_t eps wd_lr cfg model m v =
-  let m_ggWte = ggWte m
-      v_ggWte = ggWte v
-      m_ggWpe = ggWpe m
-      v_ggWpe = ggWpe v
-   in model
-        { gptWte = updateMatrix lr_t eps wd_lr (gptWte model) (ggWte m) (ggWte v),
-          gptWpe = updateMatrix lr_t eps wd_lr (gptWpe model) (ggWpe m) (ggWpe v),
-          gptBlocks =
-            zipWith3
-              (updateBlock lr_t eps wd_lr)
-              (gptBlocks model)
-              (ggBlocks m)
-              (ggBlocks v),
-          gptLnGamma = updateVector lr_t eps wd_lr (gptLnGamma model) (ggLnGamma m) (ggLnGamma v),
-          gptLnBeta = updateVector lr_t eps wd_lr (gptLnBeta model) (ggLnBeta m) (ggLnBeta v),
-          gptHead = updateMatrix lr_t eps wd_lr (gptHead model) (ggHead m) (ggHead v),
-          gptHeadB = updateVector lr_t eps wd_lr (gptHeadB model) (ggHeadB m) (ggHeadB v)
-        }
+applyUpdates lr_t eps wd_lr _cfg model m v =
+  model
+    { gptWte = updateMatrix lr_t eps wd_lr (gptWte model) (ggWte m) (ggWte v),
+      gptWpe = updateMatrix lr_t eps wd_lr (gptWpe model) (ggWpe m) (ggWpe v),
+      gptBlocks =
+        zipWith3
+          (updateBlock lr_t eps wd_lr)
+          (gptBlocks model)
+          (ggBlocks m)
+          (ggBlocks v),
+      gptLnGamma = updateVector lr_t eps wd_lr (gptLnGamma model) (ggLnGamma m) (ggLnGamma v),
+      gptLnBeta = updateVector lr_t eps wd_lr (gptLnBeta model) (ggLnBeta m) (ggLnBeta v),
+      gptHead = updateMatrix lr_t eps wd_lr (gptHead model) (ggHead m) (ggHead v),
+      gptHeadB = updateVector lr_t eps wd_lr (gptHeadB model) (ggHeadB m) (ggHeadB v)
+    }
 
 updateBlock :: Double -> Double -> Double -> TransformerBlock -> BlockGrads -> BlockGrads -> TransformerBlock
 updateBlock lr_t eps wd_lr tb m v =
@@ -263,7 +254,7 @@ trainLoop lr beta1 beta2 eps wd cfg model data_ seqLen steps =
   let opt0 = initAdamW cfg
    in go model opt0 [] steps 0
   where
-    go m opt losses 0 _ = pure (m, reverse losses)
+    go m _opt losses 0 _ = pure (m, reverse losses)
     go m opt losses n offset = do
       let endIdx = offset + seqLen + 1
       if endIdx > length data_
@@ -325,7 +316,7 @@ trainLoopMasked lr beta1 beta2 eps wd cfg model data_ seqLen steps maskRate mask
   let opt0 = initAdamW cfg
    in go model opt0 [] steps 0
   where
-    go m opt losses 0 _ = pure (m, reverse losses)
+    go m _opt losses 0 _ = pure (m, reverse losses)
     go m opt losses n offset = do
       if offset + seqLen > length data_
         then go m opt losses (n - 1) 0

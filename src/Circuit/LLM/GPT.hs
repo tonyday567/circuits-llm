@@ -25,7 +25,6 @@ import Numeric.LinearAlgebra
     cols,
     fromLists,
     fromRows,
-    konst,
     rows,
     scale,
     subMatrix,
