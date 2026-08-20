@@ -37,14 +37,14 @@ library
   build-depends:
     base >=4.20 && <5,
     bytestring >=0.11 && <0.13,
-    circuits >=0.2 && <0.5,
+    circuits >=0.3 && <0.4,
     circuits-diff >=0.1 && <0.2,
     containers >=0.6 && <0.9,
-    harpie >=0.2 && <0.4,
+    harpie >=0.3 && <0.4,
     hmatrix >=0.20 && <0.21,
     numhask >=0.14 && <0.15,
-    random >=1.2 && <1.3,
-    text >=2.0 && <3,
+    random >=1.2 && <1.4,
+    text >=1.2 && <3,
     vector >=0.12 && <0.14,
 
   hs-source-dirs: src
@@ -59,9 +59,9 @@ executable circuits-llm-ssm-axioma
   hs-source-dirs: app
   build-depends:
     base >=4.20 && <5,
-    circuits >=0.2 && <0.5,
+    circuits >=0.3 && <0.4,
     circuits-llm >=0.1 && <0.2,
-    harpie >=0.2 && <0.4,
+    harpie >=0.3 && <0.4,
     vector >=0.12 && <0.14,
 
   default-language: GHC2024
