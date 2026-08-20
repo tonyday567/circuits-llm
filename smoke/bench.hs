@@ -6,12 +6,12 @@ module Main where
 import Circuit.LLM.BPE
 import Circuit.Meter.Time (ticksION)
 import Control.Monad (replicateM_)
-import Data.ByteString qualified as BS
-import Data.Map.Strict qualified as Map
-import Data.Text qualified as T
-import Data.Text.Encoding qualified as TE
-import Data.Text.IO qualified as TIO
-import Data.Vector.Unboxed qualified as V
+import qualified Data.ByteString as BS
+import qualified Data.Map.Strict as Map
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import qualified Data.Text.IO as TIO
+import qualified Data.Vector.Unboxed as V
 import System.IO (hFlush, hPutStrLn, stderr, stdout)
 import Text.Printf (printf)
 

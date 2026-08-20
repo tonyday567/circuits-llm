@@ -17,7 +17,7 @@ import Numeric.LinearAlgebra
     (<>),
     (|||),
   )
-import Numeric.LinearAlgebra qualified as LA
+import qualified Numeric.LinearAlgebra as LA
 import Numeric.LinearAlgebra.Data (maxElement)
 import System.CPUTime (getCPUTime)
 import Text.Printf (printf)

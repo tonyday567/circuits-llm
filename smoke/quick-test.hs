@@ -1,8 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import Circuit.LLM.BPE
-import Data.Text qualified as T
-import Data.Text.IO qualified as TIO
+import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 
 main = do
   m <- loadBPEModel "/Users/tonyday567/other/building-from-scratch/bpe/data/tok276.model"

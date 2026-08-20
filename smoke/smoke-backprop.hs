@@ -18,7 +18,7 @@ import Numeric.LinearAlgebra
     sumElements,
     toList,
   )
-import Numeric.LinearAlgebra qualified as LA
+import qualified Numeric.LinearAlgebra as LA
 
 main :: IO ()
 main = do

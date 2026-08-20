@@ -1,7 +1,7 @@
 module Main where
 
 import Circuit.LLM.Attention
-import Data.Vector.Unboxed qualified as V
+import qualified Data.Vector.Unboxed as V
 import Harpie.Array (Array, array, index, shape)
 import Text.Printf (printf)
 

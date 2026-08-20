@@ -18,7 +18,7 @@ import Numeric.LinearAlgebra
     (<>),
     (><),
   )
-import Numeric.LinearAlgebra qualified as LA
+import qualified Numeric.LinearAlgebra as LA
 import System.Exit (exitFailure)
 import Text.Printf (printf)
 import Prelude hiding ((<>))

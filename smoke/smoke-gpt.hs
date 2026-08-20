@@ -4,7 +4,7 @@ module Main where
 
 import Circuit.LLM.GPT
 import Numeric.LinearAlgebra (Matrix, Vector, fromLists, fromRows, konst, matrix, subMatrix, sumElements, toRows)
-import Numeric.LinearAlgebra qualified as LA
+import qualified Numeric.LinearAlgebra as LA
 
 main :: IO ()
 main = do
