@@ -2,24 +2,44 @@ cabal-version: 3.0
 name: circuits-llm
 version: 0.1.0.0
 license: BSD-3-Clause
+license-file: LICENSE
+copyright: Tony Day (c) 2026
+category: nlp
 author: Tony Day
 maintainer: tonyday567@gmail.com
-category: nlp
+homepage: https://github.com/tonyday567/circuits-llm#readme
+bug-reports: https://github.com/tonyday567/circuits-llm/issues
 synopsis: Small language-model experiments with circuits and hmatrix
 description:
   Experiments in training and inference for small transformer-style
   language models, using the circuits ecosystem and hmatrix for linear
   algebra.  Includes byte-pair encoding, attention, GPT-2-shaped
   forward/backward passes, and AdamW training loops.
-
 build-type: Simple
-tested-with: ghc ==9.14.1
+tested-with:
+  ghc ==9.10.1
+  ghc ==9.12.2
+  ghc ==9.14.1
 
 source-repository head
   type: git
   location: https://github.com/tonyday567/circuits-llm
 
+common ghc-options-stanza
+  ghc-options:
+    -Wall
+    -Wno-unused-imports
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wpartial-fields
+    -Wredundant-constraints
+
 library
+  import: ghc-options-stanza
+  default-language: GHC2024
+  hs-source-dirs: src
   exposed-modules:
     Circuit.LLM.Attention
     Circuit.LLM.Backprop
@@ -30,7 +50,6 @@ library
     Circuit.LLM.SSM
     Circuit.LLM.Training
     Circuit.LLM.Weights
-
   other-modules:
     Circuit.LLM.Diff
 
@@ -47,22 +66,14 @@ library
     text >=1.2 && <3,
     vector >=0.12 && <0.14,
 
-  hs-source-dirs: src
-  default-language: GHC2024
-  ghc-options:
-    -O2
-    -Wall
-    -Wcompat
-
 executable circuits-llm-ssm-axioma
-  main-is: ssm-axioma.hs
+  import: ghc-options-stanza
+  default-language: GHC2024
   hs-source-dirs: app
+  main-is: ssm-axioma.hs
   build-depends:
     base >=4.20 && <5,
     circuits >=0.3 && <0.4,
     circuits-llm >=0.1 && <0.2,
     harpie >=0.3 && <0.4,
     vector >=0.12 && <0.14,
-
-  default-language: GHC2024
-  ghc-options: -O2

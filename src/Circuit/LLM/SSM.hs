@@ -41,9 +41,9 @@ module Circuit.LLM.SSM
   )
 where
 
+import Circuit.Body (Body (..))
 import Circuit.Poly (Mono, Poly (Tensor), System, SystemT (..), monoDir, monoIn, mooreSystem, system)
 import Circuit.Process (Process (..), systemToProcess)
-import Circuit.Thread (Thread (..))
 import Data.List (foldl1', scanl')
 import Data.Void (absurd)
 import Harpie.Array (Array, zipWith)
@@ -180,7 +180,7 @@ assocSSMVec h0 = map (\(AffVec a b) -> zipWith (+) (zipWith (*) a h0) b) . assoc
 -- inputs.  This is the same semantics as 'Circuit.Process.scan', but stated
 -- directly on 'System'.
 runSystem :: System (->) s (Mono i o) -> s -> [i] -> ([o], s)
-runSystem (SystemT (Thread sys)) s0 is = go s0 is []
+runSystem (SystemT (Body sys)) s0 is = go s0 is []
   where
     go s [] acc = (reverse acc, s)
     go s (i : iss) acc =
@@ -229,7 +229,7 @@ runMultiHeadSSMSystem ::
   [(AffVec, AffVec)] ->
   ([(Array Double, Array Double)], (Array Double, Array Double))
 runMultiHeadSSMSystem s0 affPairs =
-  let SystemT (Thread f) = multiHeadSSMSystem
+  let SystemT (Body f) = multiHeadSSMSystem
       go s [] acc = (reverse acc, s)
       go (h1, h2) ((aff1, aff2) : affs') acc =
         let ((h1', h2'), ((o1, ()), (o2, ()))) = f ((h1, h2), (monoIn aff1, monoIn aff2))

@@ -1,5 +1,6 @@
 module Main where
 
+import Circuit.Body (Body (..))
 import Circuit.LLM.Attention (causalMask, multiHeadAttention)
 import Circuit.LLM.SSM
   ( Aff (..),
@@ -24,7 +25,6 @@ import Circuit.LLM.SSM
   )
 import Circuit.Poly (SystemT (..), monoIn)
 import Circuit.Process (scan, systemToProcess)
-import Circuit.Thread (Thread (..))
 import Data.List (foldl', scanl')
 import Data.Vector.Unboxed qualified as V
 import Harpie.Array (Array, array, mult, shape, zipWith, (!))
@@ -346,7 +346,7 @@ main = do
               aff2 = AffVec (array [1] [0.6]) (array [1] [2])
               (indOuts, _) = runMultiHeadSSMSystem (h1, h2) [(aff1, aff2)]
               (coupOuts, _) =
-                let SystemT (Thread f) = coupledMultiHeadSSMSystem
+                let SystemT (Body f) = coupledMultiHeadSSMSystem
                     go s [] acc = (reverse acc, s)
                     go (x, y) ((a1, a2) : rest) acc =
                       let ((x', y'), ((o1, ()), (o2, ()))) = f ((x, y), (monoIn a1, monoIn a2))
