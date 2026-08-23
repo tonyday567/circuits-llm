@@ -4,3 +4,7 @@ dist-newstyle/
 *.dyn_hi
 *.dyn_o
 .ghc.environment.*
+*.ghc.environment.*
+.stack-work/
+.DS_Store
+cabal.project.local
