@@ -23,8 +23,8 @@ import Circuit.LLM.SSM
     ssmSystem,
     ssmSystemVec,
   )
-import Circuit.Poly (SystemT (..), monoIn)
 import Circuit.Process (scan, systemToProcess)
+import Circuit.System (SystemT (..), monoIn)
 import Data.List (foldl', scanl')
 import Data.Vector.Unboxed qualified as V
 import Harpie.Array (Array, array, mult, shape, zipWith, (!))

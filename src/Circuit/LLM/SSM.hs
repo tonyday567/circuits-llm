@@ -42,8 +42,9 @@ module Circuit.LLM.SSM
 where
 
 import Circuit.Body (Body (..))
-import Circuit.Poly (Mono, Poly (Tensor), System, SystemT (..), monoDir, monoIn, mooreSystem, system)
+import Circuit.Poly (Mono, Poly (Tensor))
 import Circuit.Process (Process (..), systemToProcess)
+import Circuit.System (System, SystemT (..), monoDir, monoIn, mooreSystem, system)
 import Data.List (foldl1', scanl')
 import Data.Void (absurd)
 import Harpie.Array (Array, zipWith)
