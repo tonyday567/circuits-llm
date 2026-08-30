@@ -117,7 +117,7 @@ assocSSM h0 = map (\(Aff a b) -> a * h0 + b) . assocScan
 -- | A 'Moore (,)' whose state is the hidden state @h@ and whose output is @h@.
 -- Input is the affine coefficient pair @(a_t, b_t)@; the initial state @h0@ is
 -- supplied when converting to a 'Process' or running directly.
-ssmSystem :: Moore (,) (->) Double (Mono Aff Double)
+ssmSystem :: Moore (,) Double (->) (Mono Aff Double)
 ssmSystem = mooreMachine step extract
   where
     step h (Aff a b) = a * h + b
@@ -180,7 +180,7 @@ assocSSMVec h0 = map (\(AffVec a b) -> zipWith (+) (zipWith (*) a h0) b) . assoc
 -- | Run a deterministic 'Moore (,)' with a monomial interface over a list of
 -- inputs.  This is the same semantics as 'Circuit.Process.scan', but stated
 -- directly on 'Moore (,)'.
-mooreMorphism :: Moore (,) (->) s (Mono i o) -> s -> [i] -> ([o], s)
+mooreMorphism :: Moore (,) s (->) (Mono i o) -> s -> [i] -> ([o], s)
 mooreMorphism (Moore (Body sys)) s0 is = go s0 is []
   where
     go s [] acc = (reverse acc, s)
@@ -190,7 +190,7 @@ mooreMorphism (Moore (Body sys)) s0 is = go s0 is []
 
 -- | Vector SSM as a 'Moore (,) (->)' with harpie state, input 'AffVec', and full
 -- state observation.
-ssmSystemVec :: Moore (,) (->) (Array Double) (Mono AffVec (Array Double))
+ssmSystemVec :: Moore (,) (Array Double) (->) (Mono AffVec (Array Double))
 ssmSystemVec = moore $ \(h, d) ->
   let AffVec a b = monoDir d
       h' = zipWith (+) (zipWith (*) a h) b
@@ -210,8 +210,8 @@ ssmSystemVec = moore $ \(h, d) ->
 multiHeadSSMSystem ::
   Moore
     (,)
-    (->)
     (Array Double, Array Double)
+    (->)
     (PTensor (Mono AffVec (Array Double)) (Mono AffVec (Array Double)))
 multiHeadSSMSystem = moore $ \case
   ((h1, h2), (Right aff1, Right aff2)) ->
@@ -257,8 +257,8 @@ runSharedInputMultiHeadSSMSystem s0 affs = runMultiHeadSSMSystem s0 [(aff, aff) 
 coupledMultiHeadSSMSystem ::
   Moore
     (,)
-    (->)
     (Array Double, Array Double)
+    (->)
     (PTensor (Mono AffVec (Array Double)) (Mono AffVec (Array Double)))
 coupledMultiHeadSSMSystem = moore $ \case
   ((h1, h2), (Right aff1, Right aff2)) ->
