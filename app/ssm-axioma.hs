@@ -13,18 +13,18 @@ import Circuit.LLM.SSM
     assocScanVec,
     chunkedScan,
     coupledMultiHeadSSMSystem,
+    mooreMorphism,
     multiHeadSSMSystem,
     runMultiHeadSSMSystem,
     runSharedInputMultiHeadSSMSystem,
-    mooreMorphism,
     seqSSM,
     seqSSMVec,
     ssmProcess,
     ssmSystem,
     ssmSystemVec,
   )
-import Circuit.Process (scan, mooreAsProcess)
 import Circuit.Moore (Moore (..), monoIn)
+import Circuit.Process (mooreAsProcess, scan)
 import Data.List (foldl', scanl')
 import Data.Vector.Unboxed qualified as V
 import Harpie.Array (Array, array, mult, shape, zipWith, (!))

@@ -42,9 +42,9 @@ module Circuit.LLM.SSM
 where
 
 import Circuit.Body (Body (..))
+import Circuit.Moore (Moore (..), monoDir, monoIn, moore, mooreMachine)
 import Circuit.Poly (Mono, Poly (PTensor))
 import Circuit.Process (Process (..), mooreAsProcess)
-import Circuit.Moore (Moore (..), monoDir, monoIn, mooreMachine, moore)
 import Data.List (foldl1', scanl')
 import Data.Void (absurd)
 import Harpie.Array (Array, zipWith)
@@ -208,7 +208,8 @@ ssmSystemVec = moore $ \(h, d) ->
 -- layers: both heads fire on the same tick, each with its own input.  A
 -- cartesian 'Prod' would force a choice between heads via @Either@ directions.
 multiHeadSSMSystem ::
-  Moore (,)
+  Moore
+    (,)
     (->)
     (Array Double, Array Double)
     (PTensor (Mono AffVec (Array Double)) (Mono AffVec (Array Double)))
@@ -254,7 +255,8 @@ runSharedInputMultiHeadSSMSystem s0 affs = runMultiHeadSSMSystem s0 [(aff, aff) 
 -- on head 2's state.  It is the "flip" oracle for the multi-head centrality
 -- pair.
 coupledMultiHeadSSMSystem ::
-  Moore (,)
+  Moore
+    (,)
     (->)
     (Array Double, Array Double)
     (PTensor (Mono AffVec (Array Double)) (Mono AffVec (Array Double)))
