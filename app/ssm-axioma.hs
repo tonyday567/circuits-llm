@@ -16,15 +16,15 @@ import Circuit.LLM.SSM
     multiHeadSSMSystem,
     runMultiHeadSSMSystem,
     runSharedInputMultiHeadSSMSystem,
-    runSystem,
+    mooreMorphism,
     seqSSM,
     seqSSMVec,
     ssmProcess,
     ssmSystem,
     ssmSystemVec,
   )
-import Circuit.Process (scan, systemToProcess)
-import Circuit.System (SystemT (..), monoIn)
+import Circuit.Process (scan, mooreAsProcess)
+import Circuit.Moore (Moore (..), monoIn)
 import Data.List (foldl', scanl')
 import Data.Vector.Unboxed qualified as V
 import Harpie.Array (Array, array, mult, shape, zipWith, (!))
@@ -235,11 +235,11 @@ main = do
               seqResult = map (\a -> a ! [0]) (seqSSMVec h0scalar scalarSteps)
               assocResult = assocSSM 0 [Aff 0.5 1, Aff 0.5 2]
            in and [approx x y | (x, y) <- zip seqResult assocResult],
-        check "SSM System view typechecks" $
-          let (outs, _sF) = runSystem ssmSystemVec h0v vsteps
+        check "SSM Moore (,) view typechecks" $
+          let (outs, _sF) = mooreMorphism ssmSystemVec h0v vsteps
            in length outs == length vsteps,
-        check "SSM System scan equals sequential scan" $
-          let (sysResult, _sF) = runSystem ssmSystemVec h0v vsteps
+        check "SSM Moore (,) scan equals sequential scan" $
+          let (sysResult, _sF) = mooreMorphism ssmSystemVec h0v vsteps
               seqResult = seqSSMVec h0v vsteps
            in and [approxArray x y | (x, y) <- zip sysResult seqResult],
         check "SSM vs attention: same-shape output on shared embed" $
@@ -282,12 +282,12 @@ main = do
               (indOuts, _) = runMultiHeadSSMSystem (h0, h0) [(aff, aff) | aff <- sharedSteps]
            in tensorOuts == indOuts,
         -- -----------------------------------------------------------------------
-        -- System pointing repair
+        -- Moore (,) pointing repair
         -- -----------------------------------------------------------------------
-        check "SSM System carries h0 as a point" $
+        check "SSM Moore (,) carries h0 as a point" $
           let h0 = 3.0
               affs = [Aff 0.5 1, Aff 0.5 2, Aff 0.5 3]
-              procResult = scan (systemToProcess h0 id ssmSystem) affs
+              procResult = scan (mooreAsProcess ssmSystem h0) affs
               seqResult = seqSSM h0 affs
            in and [approx x y | (x, y) <- zip procResult seqResult],
         -- -----------------------------------------------------------------------
@@ -339,14 +339,14 @@ main = do
               aff1 = AffVec (array [1] [0.5]) (array [1] [1])
               aff2 = AffVec (array [1] [0.6]) (array [1] [2])
            in not (bodyCentral coupledHead1 coupledHead2 (s0, (aff1, aff2))),
-        check "SSM coupled multi-head System typechecks and differs from independent" $
+        check "SSM coupled multi-head Moore (,) typechecks and differs from independent" $
           let h1 = array [1] [1]
               h2 = array [1] [2]
               aff1 = AffVec (array [1] [0.5]) (array [1] [1])
               aff2 = AffVec (array [1] [0.6]) (array [1] [2])
               (indOuts, _) = runMultiHeadSSMSystem (h1, h2) [(aff1, aff2)]
               (coupOuts, _) =
-                let SystemT (Body f) = coupledMultiHeadSSMSystem
+                let Moore (Body f) = coupledMultiHeadSSMSystem
                     go s [] acc = (reverse acc, s)
                     go (x, y) ((a1, a2) : rest) acc =
                       let ((x', y'), ((o1, ()), (o2, ()))) = f ((x, y), (monoIn a1, monoIn a2))
