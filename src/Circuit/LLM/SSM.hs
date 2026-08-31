@@ -42,9 +42,9 @@ module Circuit.LLM.SSM
 where
 
 import Circuit.Body (Body (..))
-import Circuit.Moore (Moore (..), mooreAsProcess, monoDir, monoIn, moore, mooreMachine)
-import Circuit.Poly (Mono, Poly (PTensor))
-import Circuit.Process (Process (..))
+import Circuit.Moore (Moore (..), fromEvalMoore, monoDir, monoIn, moore)
+import Circuit.Poly (Eval (..), Mono, Poly (PTensor))
+import Circuit.Process (Process (..), asPProcess, asProcess)
 import Data.List (foldl1', scanl')
 import Data.Void (absurd)
 import Harpie.Array (Array, zipWith)
@@ -118,18 +118,15 @@ assocSSM h0 = map (\(Aff a b) -> a * h0 + b) . assocScan
 -- Input is the affine coefficient pair @(a_t, b_t)@; the initial state @h0@ is
 -- supplied when converting to a 'Process' or running directly.
 ssmSystem :: Moore (,) Double (->) (Mono Aff Double)
-ssmSystem = mooreMachine step extract
-  where
-    step h (Aff a b) = a * h + b
-    extract h = h
+ssmSystem = fromEvalMoore $ \h -> EP (EK h, EE (\aff -> let Aff a b = aff in a * h + b))
 
 -- | A 'Process' whose state is the hidden state @h@ and whose output is @h@.
 -- Input is the affine coefficient pair @(a_t, b_t)@.
 --
 -- This is the first-input-seeded presentation with @h0 = 0@.  Use
--- 'ssmSystem' with 'mooreAsProcess' when you need a non-zero seed.
+-- 'ssmSystem' with 'asPProcess' / 'asProcess' when you need a non-zero seed.
 ssmProcess :: Process Aff Double
-ssmProcess = mooreAsProcess ssmSystem 0
+ssmProcess = asProcess (asPProcess ssmSystem 0)
 
 -- ---------------------------------------------------------------------------
 -- Vector (harpie) affine SSM — diagonal-matrix state

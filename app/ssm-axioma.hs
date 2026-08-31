@@ -23,8 +23,8 @@ import Circuit.LLM.SSM
     ssmSystem,
     ssmSystemVec,
   )
-import Circuit.Moore (Moore (..), mooreAsProcess, monoIn)
-import Circuit.Process (scan)
+import Circuit.Moore (Moore (..), monoIn)
+import Circuit.Process (asPProcess, asProcess, scan)
 import Data.List (foldl', scanl')
 import Data.Vector.Unboxed qualified as V
 import Harpie.Array (Array, array, mult, shape, zipWith, (!))
@@ -287,7 +287,7 @@ main = do
         check "SSM Moore (,) carries h0 as a point" $
           let h0 = 3.0
               affs = [Aff 0.5 1, Aff 0.5 2, Aff 0.5 3]
-              procResult = scan (mooreAsProcess ssmSystem h0) affs
+              procResult = scan (asProcess (asPProcess ssmSystem h0)) affs
               seqResult = seqSSM h0 affs
            in and [approx x y | (x, y) <- zip procResult seqResult],
         -- -----------------------------------------------------------------------
