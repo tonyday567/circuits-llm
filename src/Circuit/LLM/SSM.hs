@@ -23,16 +23,16 @@ module Circuit.LLM.SSM
     assocScanVec,
     assocSSMVec,
 
-    -- * Moore (,) view
+    -- * Machine (,) view
     mooreMorphism,
     ssmSystemVec,
 
-    -- * Multi-head Moore (,) view (Dirichlet tensor)
+    -- * Multi-head Machine (,) view (Dirichlet tensor)
     multiHeadSSMSystem,
     runMultiHeadSSMSystem,
     runSharedInputMultiHeadSSMSystem,
 
-    -- * Process / Moore (,) view
+    -- * Process / Machine (,) view
     ssmProcess,
     ssmSystem,
 
@@ -42,9 +42,9 @@ module Circuit.LLM.SSM
 where
 
 import Circuit.Body (Body (..))
-import Circuit.Moore (Moore (..), fromEvalMoore, monoDir, monoIn, moore)
+import Circuit.Machine (Machine (..), fromEvalMachine, machine, machineObsWith, monoDir, monoIn)
 import Circuit.Poly (Eval (..), Mono, Poly (PTensor))
-import Circuit.Process (Process (..), asPProcess, asProcess)
+import Circuit.Process (Process, asProcess)
 import Data.List (foldl1', scanl')
 import Data.Void (absurd)
 import Harpie.Array (Array, zipWith)
@@ -114,19 +114,19 @@ chunkedScan k affs
 assocSSM :: Double -> [Aff] -> [Double]
 assocSSM h0 = map (\(Aff a b) -> a * h0 + b) . assocScan
 
--- | A 'Moore (,)' whose state is the hidden state @h@ and whose output is @h@.
+-- | A 'Machine (,)' whose state is the hidden state @h@ and whose output is @h@.
 -- Input is the affine coefficient pair @(a_t, b_t)@; the initial state @h0@ is
 -- supplied when converting to a 'Process' or running directly.
-ssmSystem :: Moore (,) Double (->) (Mono Aff Double)
-ssmSystem = fromEvalMoore $ \h -> EP (EK h, EE (\aff -> let Aff a b = aff in a * h + b))
+ssmSystem :: Machine (,) Double (->) (Mono Aff Double)
+ssmSystem = fromEvalMachine $ \h -> EP (EK h, EE (\aff -> let Aff a b = aff in a * h + b))
 
 -- | A 'Process' whose state is the hidden state @h@ and whose output is @h@.
 -- Input is the affine coefficient pair @(a_t, b_t)@.
 --
 -- This is the first-input-seeded presentation with @h0 = 0@.  Use
--- 'ssmSystem' with 'asPProcess' / 'asProcess' when you need a non-zero seed.
-ssmProcess :: Process Aff Double
-ssmProcess = asProcess (asPProcess ssmSystem 0)
+-- 'ssmSystem' with 'machineObsWith' / 'asProcess' when you need a non-zero seed.
+ssmProcess :: Process Double Aff Double
+ssmProcess = asProcess (machineObsWith (\h -> (h, ())) ssmSystem) 0
 
 -- ---------------------------------------------------------------------------
 -- Vector (harpie) affine SSM — diagonal-matrix state
@@ -171,33 +171,33 @@ assocSSMVec :: Array Double -> [AffVec] -> [Array Double]
 assocSSMVec h0 = map (\(AffVec a b) -> zipWith (+) (zipWith (*) a h0) b) . assocScanVec
 
 -- ---------------------------------------------------------------------------
--- Moore (,) view: linear SSM as a Moore machine
+-- Machine (,) view: linear SSM as a machine
 -- ---------------------------------------------------------------------------
 
--- | Run a deterministic 'Moore (,)' with a monomial interface over a list of
--- inputs.  This is the same semantics as 'Circuit.Process.scan', but stated
--- directly on 'Moore (,)'.
-mooreMorphism :: Moore (,) s (->) (Mono i o) -> s -> [i] -> ([o], s)
-mooreMorphism (Moore (Body sys)) s0 is = go s0 is []
+-- | Run a deterministic 'Machine (,)' with a monomial interface over a list of
+-- inputs.  This is the same semantics as 'Circuit.Process.scanProcess', but stated
+-- directly on 'Machine (,)'.
+mooreMorphism :: Machine (,) s (->) (Mono i o) -> s -> [i] -> ([o], s)
+mooreMorphism (Machine (Body sys)) s0 is = go s0 is []
   where
     go s [] acc = (reverse acc, s)
     go s (i : iss) acc =
       let (s', (o, ())) = sys (s, monoIn i)
        in go s' iss (o : acc)
 
--- | Vector SSM as a 'Moore (,) (->)' with harpie state, input 'AffVec', and full
+-- | Vector SSM as a 'Machine (,) (->)' with harpie state, input 'AffVec', and full
 -- state observation.
-ssmSystemVec :: Moore (,) (Array Double) (->) (Mono AffVec (Array Double))
-ssmSystemVec = moore $ \(h, d) ->
+ssmSystemVec :: Machine (,) (Array Double) (->) (Mono AffVec (Array Double))
+ssmSystemVec = machine $ \(h, d) ->
   let AffVec a b = monoDir d
       h' = zipWith (+) (zipWith (*) a h) b
    in (h', (h', ()))
 
 -- ---------------------------------------------------------------------------
--- Multi-head SSM as a PTensor-polynomial Moore (,)
+-- Multi-head SSM as a PTensor-polynomial Machine (,)
 -- ---------------------------------------------------------------------------
 
--- | Two independent vector SSM heads packaged as a single 'Moore (,)' over the
+-- | Two independent vector SSM heads packaged as a single 'Machine (,)' over the
 -- Dirichlet tensor @PTensor (Mono AffVec (Array Double)) (Mono AffVec (Array Double))@.
 --
 -- The two heads share the same input /direction type/ ('AffVec') but receive
@@ -205,12 +205,12 @@ ssmSystemVec = moore $ \(h, d) ->
 -- layers: both heads fire on the same tick, each with its own input.  A
 -- cartesian 'Prod' would force a choice between heads via @Either@ directions.
 multiHeadSSMSystem ::
-  Moore
+  Machine
     (,)
     (Array Double, Array Double)
     (->)
     (PTensor (Mono AffVec (Array Double)) (Mono AffVec (Array Double)))
-multiHeadSSMSystem = moore $ \case
+multiHeadSSMSystem = machine $ \case
   ((h1, h2), (Right aff1, Right aff2)) ->
     let AffVec a1 b1 = aff1
         AffVec a2 b2 = aff2
@@ -228,7 +228,7 @@ runMultiHeadSSMSystem ::
   [(AffVec, AffVec)] ->
   ([(Array Double, Array Double)], (Array Double, Array Double))
 runMultiHeadSSMSystem s0 affPairs =
-  let Moore (Body f) = multiHeadSSMSystem
+  let Machine (Body f) = multiHeadSSMSystem
       go s [] acc = (reverse acc, s)
       go (h1, h2) ((aff1, aff2) : affs') acc =
         let ((h1', h2'), ((o1, ()), (o2, ()))) = f ((h1, h2), (monoIn aff1, monoIn aff2))
@@ -252,12 +252,12 @@ runSharedInputMultiHeadSSMSystem s0 affs = runMultiHeadSSMSystem s0 [(aff, aff) 
 -- on head 2's state.  It is the "flip" oracle for the multi-head centrality
 -- pair.
 coupledMultiHeadSSMSystem ::
-  Moore
+  Machine
     (,)
     (Array Double, Array Double)
     (->)
     (PTensor (Mono AffVec (Array Double)) (Mono AffVec (Array Double)))
-coupledMultiHeadSSMSystem = moore $ \case
+coupledMultiHeadSSMSystem = machine $ \case
   ((h1, h2), (Right aff1, Right aff2)) ->
     let AffVec a1 b1 = aff1
         AffVec a2 b2 = aff2
