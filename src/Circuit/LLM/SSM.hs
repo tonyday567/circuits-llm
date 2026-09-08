@@ -23,16 +23,17 @@ module Circuit.LLM.SSM
     assocScanVec,
     assocSSMVec,
 
-    -- * Machine (,) view
+    -- * Monomial body view
     mooreMorphism,
     ssmSystemVec,
 
-    -- * Multi-head Machine (,) view (Dirichlet tensor)
+    -- * Multi-head body view (Dirichlet tensor)
+    MultiHeadP,
     multiHeadSSMSystem,
     runMultiHeadSSMSystem,
     runSharedInputMultiHeadSSMSystem,
 
-    -- * Process / Machine (,) view
+    -- * Cell / Process view
     ssmProcess,
     ssmSystem,
 
@@ -41,10 +42,8 @@ module Circuit.LLM.SSM
   )
 where
 
-import Circuit.Body (Body (..))
-import Circuit.Machine (Machine (..), fromEvalMachine, machine, machineObsWith, monoDir, monoIn)
-import Circuit.Poly (Eval (..), Mono, Poly (PTensor))
-import Circuit.Process (Process, asProcess)
+import Circuit.Cell (Body (..), Cell (..), MonoBody, Process (..), evalAsCell)
+import Circuit.Poly (Dir, Eval (..), Mono, Poly (PTensor), Pos, monoDir, monoIn)
 import Data.List (foldl1', scanl')
 import Data.Void (absurd)
 import Harpie.Array (Array, zipWith)
@@ -114,19 +113,23 @@ chunkedScan k affs
 assocSSM :: Double -> [Aff] -> [Double]
 assocSSM h0 = map (\(Aff a b) -> a * h0 + b) . assocScan
 
--- | A 'Machine (,)' whose state is the hidden state @h@ and whose output is @h@.
+-- | A 'Cell' whose state is the hidden state @h@ and whose output is @h@.
 -- Input is the affine coefficient pair @(a_t, b_t)@; the initial state @h0@ is
 -- supplied when converting to a 'Process' or running directly.
-ssmSystem :: Machine (,) Double (->) (Mono Aff Double)
-ssmSystem = fromEvalMachine $ \h -> EP (EK h, EE (\aff -> let Aff a b = aff in a * h + b))
+ssmSystem :: Cell (,) Double (->) Aff Double
+ssmSystem = evalAsCell $ \h -> EP (EK h, EE (\aff -> let Aff a b = aff in a * h + b))
 
 -- | A 'Process' whose state is the hidden state @h@ and whose output is @h@.
 -- Input is the affine coefficient pair @(a_t, b_t)@.
 --
--- This is the first-input-seeded presentation with @h0 = 0@.  Use
--- 'ssmSystem' with 'machineObsWith' / 'asProcess' when you need a non-zero seed.
-ssmProcess :: Process Double Aff Double
-ssmProcess = asProcess (machineObsWith (\h -> (h, ())) ssmSystem) 0
+-- This is the first-input-seeded presentation with @h0 = 0@.  The commit
+-- steps from the seed rather than reading it: the first state is
+-- @step (h0, aff)@, so the seed is never observed and no input is dropped.
+-- Vary the seed in the commit for a non-zero @h0@.
+ssmProcess :: Process (,) Double (->) Aff Double
+ssmProcess = Process (\aff -> ssmSystemStep (0, aff)) ssmSystem
+  where
+    ssmSystemStep = case ssmSystem of Cell _ k -> k
 
 -- ---------------------------------------------------------------------------
 -- Vector (harpie) affine SSM — diagonal-matrix state
@@ -174,43 +177,41 @@ assocSSMVec h0 = map (\(AffVec a b) -> zipWith (+) (zipWith (*) a h0) b) . assoc
 -- Machine (,) view: linear SSM as a machine
 -- ---------------------------------------------------------------------------
 
--- | Run a deterministic 'Machine (,)' with a monomial interface over a list of
--- inputs.  This is the same semantics as 'Circuit.Process.scanProcess', but stated
--- directly on 'Machine (,)'.
-mooreMorphism :: Machine (,) s (->) (Mono i o) -> s -> [i] -> ([o], s)
-mooreMorphism (Machine (Body sys)) s0 is = go s0 is []
+-- | Run a deterministic monomial body over a list of inputs, returning
+-- the observations and the final state.  This is the same semantics as
+-- 'Circuit.Cell.scanProcess', but stated directly on 'MonoBody'.
+mooreMorphism :: MonoBody (,) s (->) i o -> s -> [i] -> ([o], s)
+mooreMorphism (Body sys) s0 is = go s0 is []
   where
     go s [] acc = (reverse acc, s)
     go s (i : iss) acc =
       let (s', (o, ())) = sys (s, monoIn i)
        in go s' iss (o : acc)
 
--- | Vector SSM as a 'Machine (,) (->)' with harpie state, input 'AffVec', and full
--- state observation.
-ssmSystemVec :: Machine (,) (Array Double) (->) (Mono AffVec (Array Double))
-ssmSystemVec = machine $ \(h, d) ->
+-- | Vector SSM as a monomial body with harpie state, input 'AffVec', and
+-- full state observation.
+ssmSystemVec :: MonoBody (,) (Array Double) (->) AffVec (Array Double)
+ssmSystemVec = Body $ \(h, d) ->
   let AffVec a b = monoDir d
       h' = zipWith (+) (zipWith (*) a h) b
    in (h', (h', ()))
 
 -- ---------------------------------------------------------------------------
--- Multi-head SSM as a PTensor-polynomial Machine (,)
+-- Multi-head SSM as a PTensor-polynomial body
 -- ---------------------------------------------------------------------------
 
--- | Two independent vector SSM heads packaged as a single 'Machine (,)' over the
--- Dirichlet tensor @PTensor (Mono AffVec (Array Double)) (Mono AffVec (Array Double))@.
+-- | The two-head Dirichlet polynomial.
+type MultiHeadP = PTensor (Mono AffVec (Array Double)) (Mono AffVec (Array Double))
+
+-- | Two independent vector SSM heads packaged as a single fused body over
+-- the Dirichlet tensor @MultiHeadP@.
 --
 -- The two heads share the same input /direction type/ ('AffVec') but receive
 -- independent direction values.  This is the right polynomial for parallel
 -- layers: both heads fire on the same tick, each with its own input.  A
 -- cartesian 'Prod' would force a choice between heads via @Either@ directions.
-multiHeadSSMSystem ::
-  Machine
-    (,)
-    (Array Double, Array Double)
-    (->)
-    (PTensor (Mono AffVec (Array Double)) (Mono AffVec (Array Double)))
-multiHeadSSMSystem = machine $ \case
+multiHeadSSMSystem :: Body (,) (Array Double, Array Double) (->) (Dir MultiHeadP) (Pos MultiHeadP)
+multiHeadSSMSystem = Body $ \case
   ((h1, h2), (Right aff1, Right aff2)) ->
     let AffVec a1 b1 = aff1
         AffVec a2 b2 = aff2
@@ -228,7 +229,7 @@ runMultiHeadSSMSystem ::
   [(AffVec, AffVec)] ->
   ([(Array Double, Array Double)], (Array Double, Array Double))
 runMultiHeadSSMSystem s0 affPairs =
-  let Machine (Body f) = multiHeadSSMSystem
+  let Body f = multiHeadSSMSystem
       go s [] acc = (reverse acc, s)
       go (h1, h2) ((aff1, aff2) : affs') acc =
         let ((h1', h2'), ((o1, ()), (o2, ()))) = f ((h1, h2), (monoIn aff1, monoIn aff2))
@@ -251,13 +252,8 @@ runSharedInputMultiHeadSSMSystem s0 affs = runMultiHeadSSMSystem s0 [(aff, aff) 
 -- threaded through the shared medium matters, because head 1's update depends
 -- on head 2's state.  It is the "flip" oracle for the multi-head centrality
 -- pair.
-coupledMultiHeadSSMSystem ::
-  Machine
-    (,)
-    (Array Double, Array Double)
-    (->)
-    (PTensor (Mono AffVec (Array Double)) (Mono AffVec (Array Double)))
-coupledMultiHeadSSMSystem = machine $ \case
+coupledMultiHeadSSMSystem :: Body (,) (Array Double, Array Double) (->) (Dir MultiHeadP) (Pos MultiHeadP)
+coupledMultiHeadSSMSystem = Body $ \case
   ((h1, h2), (Right aff1, Right aff2)) ->
     let AffVec a1 b1 = aff1
         AffVec a2 b2 = aff2

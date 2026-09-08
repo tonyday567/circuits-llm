@@ -1,6 +1,6 @@
 module Main where
 
-import Circuit.Body (Body (..))
+import Circuit.Cell (Body (..), Cell (..), Process (..), scanProcess)
 import Circuit.LLM.Attention (causalMask, multiHeadAttention)
 import Circuit.LLM.SSM
   ( Aff (..),
@@ -23,8 +23,7 @@ import Circuit.LLM.SSM
     ssmSystem,
     ssmSystemVec,
   )
-import Circuit.Machine (Machine (..), machineObsWith, monoIn)
-import Circuit.Process (asProcess, scanProcess)
+import Circuit.Poly (monoIn)
 import Data.List (foldl', scanl')
 import Data.Vector.Unboxed qualified as V
 import Harpie.Array (Array, array, mult, shape, zipWith, (!))
@@ -235,10 +234,10 @@ main = do
               seqResult = map (\a -> a ! [0]) (seqSSMVec h0scalar scalarSteps)
               assocResult = assocSSM 0 [Aff 0.5 1, Aff 0.5 2]
            in and [approx x y | (x, y) <- zip seqResult assocResult],
-        check "SSM Machine (,) view typechecks" $
+        check "SSM body view typechecks" $
           let (outs, _sF) = mooreMorphism ssmSystemVec h0v vsteps
            in length outs == length vsteps,
-        check "SSM Machine (,) scan equals sequential scan" $
+        check "SSM body scan equals sequential scan" $
           let (sysResult, _sF) = mooreMorphism ssmSystemVec h0v vsteps
               seqResult = seqSSMVec h0v vsteps
            in and [approxArray x y | (x, y) <- zip sysResult seqResult],
@@ -282,12 +281,13 @@ main = do
               (indOuts, _) = runMultiHeadSSMSystem (h0, h0) [(aff, aff) | aff <- sharedSteps]
            in tensorOuts == indOuts,
         -- -----------------------------------------------------------------------
-        -- Machine (,) pointing repair
+        -- Commit-seed oracle: the seed rides in the commit, never observed
         -- -----------------------------------------------------------------------
-        check "SSM Machine (,) carries h0 as a point" $
+        check "SSM process carries h0 as a commit seed" $
           let h0 = 3.0
               affs = [Aff 0.5 1, Aff 0.5 2, Aff 0.5 3]
-              procResult = scanProcess (asProcess (machineObsWith (\h -> (h, ())) ssmSystem) h0) affs
+              stepFromSeed = case ssmSystem of Cell _ k -> k
+              procResult = scanProcess (Process (\aff -> stepFromSeed (h0, aff)) ssmSystem) affs
               seqResult = seqSSM h0 affs
            in and [approx x y | (x, y) <- zip procResult seqResult],
         -- -----------------------------------------------------------------------
@@ -339,14 +339,14 @@ main = do
               aff1 = AffVec (array [1] [0.5]) (array [1] [1])
               aff2 = AffVec (array [1] [0.6]) (array [1] [2])
            in not (bodyCentral coupledHead1 coupledHead2 (s0, (aff1, aff2))),
-        check "SSM coupled multi-head Machine (,) typechecks and differs from independent" $
+        check "SSM coupled multi-head body typechecks and differs from independent" $
           let h1 = array [1] [1]
               h2 = array [1] [2]
               aff1 = AffVec (array [1] [0.5]) (array [1] [1])
               aff2 = AffVec (array [1] [0.6]) (array [1] [2])
               (indOuts, _) = runMultiHeadSSMSystem (h1, h2) [(aff1, aff2)]
               (coupOuts, _) =
-                let Machine (Body f) = coupledMultiHeadSSMSystem
+                let Body f = coupledMultiHeadSSMSystem
                     go s [] acc = (reverse acc, s)
                     go (x, y) ((a1, a2) : rest) acc =
                       let ((x', y'), ((o1, ()), (o2, ()))) = f ((x, y), (monoIn a1, monoIn a2))
