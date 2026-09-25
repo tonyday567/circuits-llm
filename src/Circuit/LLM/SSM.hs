@@ -179,7 +179,7 @@ assocSSMVec h0 = map (\(AffVec a b) -> zipWith (+) (zipWith (*) a h0) b) . assoc
 
 -- | Run a deterministic monomial body over a list of inputs, returning
 -- the observations and the final state.  This is the same semantics as
--- 'Circuit.Cell.scanProcess', but stated directly on 'MonoBody'.
+-- 'Circuit.GMachine.scanProcess', but stated directly on 'MonoBody'.
 mooreMorphism :: MonoBody (,) s (->) i o -> s -> [i] -> ([o], s)
 mooreMorphism (Stratum sys) s0 is = go s0 is []
   where
