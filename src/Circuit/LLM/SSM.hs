@@ -42,7 +42,7 @@ module Circuit.LLM.SSM
   )
 where
 
-import Circuit.Cell (Body (..), Cell (..), MonoBody, Process (..), evalAsCell)
+import Circuit.GMachine (Cell (..), MonoBody, Process (..), Stratum (..), evalAsCell)
 import Circuit.Poly (Dir, Eval (..), Mono, Poly (PTensor), Pos, monoDir, monoIn)
 import Data.List (foldl1', scanl')
 import Data.Void (absurd)
@@ -129,7 +129,7 @@ ssmSystem = evalAsCell $ \h -> EP (EK h, EE (\aff -> let Aff a b = aff in a * h 
 ssmProcess :: Process (,) Double (->) Aff Double
 ssmProcess = Process (\aff -> ssmSystemStep (0, aff)) ssmSystem
   where
-    ssmSystemStep = case ssmSystem of Cell _ k -> k
+    ssmSystemStep = case ssmSystem of Cell {absorb = k} -> k
 
 -- ---------------------------------------------------------------------------
 -- Vector (harpie) affine SSM — diagonal-matrix state
@@ -181,7 +181,7 @@ assocSSMVec h0 = map (\(AffVec a b) -> zipWith (+) (zipWith (*) a h0) b) . assoc
 -- the observations and the final state.  This is the same semantics as
 -- 'Circuit.Cell.scanProcess', but stated directly on 'MonoBody'.
 mooreMorphism :: MonoBody (,) s (->) i o -> s -> [i] -> ([o], s)
-mooreMorphism (Body sys) s0 is = go s0 is []
+mooreMorphism (Stratum sys) s0 is = go s0 is []
   where
     go s [] acc = (reverse acc, s)
     go s (i : iss) acc =
@@ -191,7 +191,7 @@ mooreMorphism (Body sys) s0 is = go s0 is []
 -- | Vector SSM as a monomial body with harpie state, input 'AffVec', and
 -- full state observation.
 ssmSystemVec :: MonoBody (,) (Array Double) (->) AffVec (Array Double)
-ssmSystemVec = Body $ \(h, d) ->
+ssmSystemVec = Stratum $ \(h, d) ->
   let AffVec a b = monoDir d
       h' = zipWith (+) (zipWith (*) a h) b
    in (h', (h', ()))
@@ -210,8 +210,8 @@ type MultiHeadP = PTensor (Mono AffVec (Array Double)) (Mono AffVec (Array Doubl
 -- independent direction values.  This is the right polynomial for parallel
 -- layers: both heads fire on the same tick, each with its own input.  A
 -- cartesian 'Prod' would force a choice between heads via @Either@ directions.
-multiHeadSSMSystem :: Body (,) (Array Double, Array Double) (->) (Dir MultiHeadP) (Pos MultiHeadP)
-multiHeadSSMSystem = Body $ \case
+multiHeadSSMSystem :: Stratum (,) (Array Double, Array Double) (->) (Dir MultiHeadP) (Pos MultiHeadP)
+multiHeadSSMSystem = Stratum $ \case
   ((h1, h2), (Right aff1, Right aff2)) ->
     let AffVec a1 b1 = aff1
         AffVec a2 b2 = aff2
@@ -229,7 +229,7 @@ runMultiHeadSSMSystem ::
   [(AffVec, AffVec)] ->
   ([(Array Double, Array Double)], (Array Double, Array Double))
 runMultiHeadSSMSystem s0 affPairs =
-  let Body f = multiHeadSSMSystem
+  let Stratum f = multiHeadSSMSystem
       go s [] acc = (reverse acc, s)
       go (h1, h2) ((aff1, aff2) : affs') acc =
         let ((h1', h2'), ((o1, ()), (o2, ()))) = f ((h1, h2), (monoIn aff1, monoIn aff2))
@@ -252,8 +252,8 @@ runSharedInputMultiHeadSSMSystem s0 affs = runMultiHeadSSMSystem s0 [(aff, aff) 
 -- threaded through the shared medium matters, because head 1's update depends
 -- on head 2's state.  It is the "flip" oracle for the multi-head centrality
 -- pair.
-coupledMultiHeadSSMSystem :: Body (,) (Array Double, Array Double) (->) (Dir MultiHeadP) (Pos MultiHeadP)
-coupledMultiHeadSSMSystem = Body $ \case
+coupledMultiHeadSSMSystem :: Stratum (,) (Array Double, Array Double) (->) (Dir MultiHeadP) (Pos MultiHeadP)
+coupledMultiHeadSSMSystem = Stratum $ \case
   ((h1, h2), (Right aff1, Right aff2)) ->
     let AffVec a1 b1 = aff1
         AffVec a2 b2 = aff2

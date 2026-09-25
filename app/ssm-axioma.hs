@@ -1,6 +1,6 @@
 module Main where
 
-import Circuit.Cell (Body (..), Cell (..), Process (..), scanProcess)
+import Circuit.GMachine (Cell (..), Process (..), Stratum (..), scanProcess)
 import Circuit.LLM.Attention (causalMask, multiHeadAttention)
 import Circuit.LLM.SSM
   ( Aff (..),
@@ -286,7 +286,7 @@ main = do
         check "SSM process carries h0 as a commit seed" $
           let h0 = 3.0
               affs = [Aff 0.5 1, Aff 0.5 2, Aff 0.5 3]
-              stepFromSeed = case ssmSystem of Cell _ k -> k
+              stepFromSeed = case ssmSystem of Cell {absorb = k} -> k
               procResult = scanProcess (Process (\aff -> stepFromSeed (h0, aff)) ssmSystem) affs
               seqResult = seqSSM h0 affs
            in and [approx x y | (x, y) <- zip procResult seqResult],
@@ -346,7 +346,7 @@ main = do
               aff2 = AffVec (array [1] [0.6]) (array [1] [2])
               (indOuts, _) = runMultiHeadSSMSystem (h1, h2) [(aff1, aff2)]
               (coupOuts, _) =
-                let Body f = coupledMultiHeadSSMSystem
+                let Stratum f = coupledMultiHeadSSMSystem
                     go s [] acc = (reverse acc, s)
                     go (x, y) ((a1, a2) : rest) acc =
                       let ((x', y'), ((o1, ()), (o2, ()))) = f ((x, y), (monoIn a1, monoIn a2))
