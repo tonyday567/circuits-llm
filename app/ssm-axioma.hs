@@ -1,6 +1,6 @@
 module Main where
 
-import Circuit.GMachine (Cell (..), Process (..), Stratum (..), scanProcess)
+import Circuit.GMachine (Cell (..), GMoore (..), Stratum (..), scanProcess)
 import Circuit.LLM.Attention (causalMask, multiHeadAttention)
 import Circuit.LLM.SSM
   ( Aff (..),
@@ -287,7 +287,7 @@ main = do
           let h0 = 3.0
               affs = [Aff 0.5 1, Aff 0.5 2, Aff 0.5 3]
               stepFromSeed = case ssmSystem of Cell {absorb = k} -> k
-              procResult = scanProcess (Process (\aff -> stepFromSeed (h0, aff)) ssmSystem) affs
+              procResult = scanProcess (GMoore (\aff -> stepFromSeed (h0, aff)) ssmSystem) affs
               seqResult = seqSSM h0 affs
            in and [approx x y | (x, y) <- zip procResult seqResult],
         -- -----------------------------------------------------------------------

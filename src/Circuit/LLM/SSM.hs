@@ -1,6 +1,6 @@
 {-# LANGUAGE DerivingStrategies #-}
 
--- | Linear state-space model as a 'Process' and the associative-scan law.
+-- | Linear state-space model as a 'GMoore' and the associative-scan law.
 --
 -- A scalar linear SSM is the recurrence @h_t = a_t h_{t-1} + b_t@.  Each step
 -- is an affine function @(a_t, b_t)@; composition of affine functions is
@@ -33,7 +33,7 @@ module Circuit.LLM.SSM
     runMultiHeadSSMSystem,
     runSharedInputMultiHeadSSMSystem,
 
-    -- * Cell / Process view
+    -- * Cell / GMoore view
     ssmProcess,
     ssmSystem,
 
@@ -42,7 +42,7 @@ module Circuit.LLM.SSM
   )
 where
 
-import Circuit.GMachine (Cell (..), MonoBody, Process (..), Stratum (..), evalAsCell)
+import Circuit.GMachine (Cell (..), GMoore (..), MonoBody, Stratum (..), evalAsCell)
 import Circuit.Poly (Dir, Eval (..), Mono, Poly (PTensor), Pos, monoDir, monoIn)
 import Data.List (foldl1', scanl')
 import Data.Void (absurd)
@@ -115,19 +115,19 @@ assocSSM h0 = map (\(Aff a b) -> a * h0 + b) . assocScan
 
 -- | A 'Cell' whose state is the hidden state @h@ and whose output is @h@.
 -- Input is the affine coefficient pair @(a_t, b_t)@; the initial state @h0@ is
--- supplied when converting to a 'Process' or running directly.
+-- supplied when converting to a 'GMoore' or running directly.
 ssmSystem :: Cell (,) Double (->) Aff Double
 ssmSystem = evalAsCell $ \h -> EP (EK h, EE (\aff -> let Aff a b = aff in a * h + b))
 
--- | A 'Process' whose state is the hidden state @h@ and whose output is @h@.
+-- | A 'GMoore' whose state is the hidden state @h@ and whose output is @h@.
 -- Input is the affine coefficient pair @(a_t, b_t)@.
 --
 -- This is the first-input-seeded presentation with @h0 = 0@.  The commit
 -- steps from the seed rather than reading it: the first state is
 -- @step (h0, aff)@, so the seed is never observed and no input is dropped.
 -- Vary the seed in the commit for a non-zero @h0@.
-ssmProcess :: Process (,) Double (->) Aff Double
-ssmProcess = Process (\aff -> ssmSystemStep (0, aff)) ssmSystem
+ssmProcess :: GMoore (,) Double (->) Aff Double
+ssmProcess = GMoore (\aff -> ssmSystemStep (0, aff)) ssmSystem
   where
     ssmSystemStep = case ssmSystem of Cell {absorb = k} -> k
 
