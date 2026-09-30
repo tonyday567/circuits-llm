@@ -1,6 +1,6 @@
 {-# LANGUAGE DerivingStrategies #-}
 
--- | Linear state-space model as a 'GMoore' and the associative-scan law.
+-- | Linear state-space model as a 'Moore' and the associative-scan law.
 --
 -- A scalar linear SSM is the recurrence @h_t = a_t h_{t-1} + b_t@.  Each step
 -- is an affine function @(a_t, b_t)@; composition of affine functions is
@@ -33,7 +33,7 @@ module Circuit.LLM.SSM
     runMultiHeadSSMSystem,
     runSharedInputMultiHeadSSMSystem,
 
-    -- * Cell / GMoore view
+    -- * Cell / Moore view
     ssmProcess,
     ssmSystem,
 
@@ -42,10 +42,10 @@ module Circuit.LLM.SSM
   )
 where
 
-import Circuit.GMachine (Cell (..), GMoore (..), MonoBody, Stratum (..), evalAsCell)
+import Circuit.GMachine (Cell (..), Moore, Stratum (..), moore)
 import Circuit.Poly (Dir, Eval (..), Mono, Poly (PTensor), Pos, monoDir, monoIn)
 import Data.List (foldl1', scanl')
-import Data.Void (absurd)
+import Data.Void (Void, absurd)
 import Harpie.Array (Array, zipWith)
 import Prelude hiding (zipWith)
 
@@ -115,21 +115,20 @@ assocSSM h0 = map (\(Aff a b) -> a * h0 + b) . assocScan
 
 -- | A 'Cell' whose state is the hidden state @h@ and whose output is @h@.
 -- Input is the affine coefficient pair @(a_t, b_t)@; the initial state @h0@ is
--- supplied when converting to a 'GMoore' or running directly.
+-- supplied when converting to a 'Moore' or running directly.
 ssmSystem :: Cell (,) Double (->) Aff Double
-ssmSystem = evalAsCell $ \h -> EP (EK h, EE (\aff -> let Aff a b = aff in a * h + b))
+ssmSystem = Cell (\(h, aff) -> let Aff a b = aff in a * h + b) id
 
--- | A 'GMoore' whose state is the hidden state @h@ and whose output is @h@.
+-- | A 'Moore' whose state is the hidden state @h@ and whose output is @h@.
 -- Input is the affine coefficient pair @(a_t, b_t)@.
 --
 -- This is the first-input-seeded presentation with @h0 = 0@.  The commit
 -- steps from the seed rather than reading it: the first state is
 -- @step (h0, aff)@, so the seed is never observed and no input is dropped.
 -- Vary the seed in the commit for a non-zero @h0@.
-ssmProcess :: GMoore (,) Double (->) Aff Double
-ssmProcess = GMoore (\aff -> ssmSystemStep (0, aff)) ssmSystem
-  where
-    ssmSystemStep = case ssmSystem of Cell {absorb = k} -> k
+ssmProcess :: Moore Aff Double
+ssmProcess = case ssmSystem of
+  Cell k o -> moore (\aff -> k (0, aff)) (curry k) o
 
 -- ---------------------------------------------------------------------------
 -- Vector (harpie) affine SSM — diagonal-matrix state
@@ -179,8 +178,9 @@ assocSSMVec h0 = map (\(AffVec a b) -> zipWith (+) (zipWith (*) a h0) b) . assoc
 
 -- | Run a deterministic monomial body over a list of inputs, returning
 -- the observations and the final state.  This is the same semantics as
--- 'Circuit.GMachine.scanProcess', but stated directly on 'MonoBody'.
-mooreMorphism :: MonoBody (,) s (->) i o -> s -> [i] -> ([o], s)
+-- 'Circuit.GMachine.scan' over the corresponding 'Moore', but stated
+-- directly on the 'Stratum' view.
+mooreMorphism :: Stratum (,) s (->) (Either Void i) (o, ()) -> s -> [i] -> ([o], s)
 mooreMorphism (Stratum sys) s0 is = go s0 is []
   where
     go s [] acc = (reverse acc, s)
@@ -190,7 +190,7 @@ mooreMorphism (Stratum sys) s0 is = go s0 is []
 
 -- | Vector SSM as a monomial body with harpie state, input 'AffVec', and
 -- full state observation.
-ssmSystemVec :: MonoBody (,) (Array Double) (->) AffVec (Array Double)
+ssmSystemVec :: Stratum (,) (Array Double) (->) (Either Void AffVec) (Array Double, ())
 ssmSystemVec = Stratum $ \(h, d) ->
   let AffVec a b = monoDir d
       h' = zipWith (+) (zipWith (*) a h) b

@@ -1,6 +1,6 @@
 module Main where
 
-import Circuit.GMachine (Cell (..), GMoore (..), Stratum (..), scanProcess)
+import Circuit.GMachine (Cell (..), Stratum (..), moore, scan)
 import Circuit.LLM.Attention (causalMask, multiHeadAttention)
 import Circuit.LLM.SSM
   ( Aff (..),
@@ -214,11 +214,11 @@ main = do
                 | k <- chunkSizes
                 ],
         check "SSM Process scan equals sequential scan" $
-          let procResult = scanProcess ssmProcess steps
+          let procResult = scan ssmProcess steps
               seqResult = seqSSM 0 steps
            in and [approx x y | (x, y) <- zip procResult seqResult],
         check "SSM Process scan equals associative scan" $
-          let procResult = scanProcess ssmProcess steps
+          let procResult = scan ssmProcess steps
               assocResult = assocSSM 0 steps
            in and [approx x y | (x, y) <- zip procResult assocResult],
         check "SSM vector sequential scan equals associative scan" $
@@ -287,7 +287,7 @@ main = do
           let h0 = 3.0
               affs = [Aff 0.5 1, Aff 0.5 2, Aff 0.5 3]
               stepFromSeed = case ssmSystem of Cell {absorb = k} -> k
-              procResult = scanProcess (GMoore (\aff -> stepFromSeed (h0, aff)) ssmSystem) affs
+              procResult = scan (moore (\aff -> stepFromSeed (h0, aff)) (curry stepFromSeed) id) affs
               seqResult = seqSSM h0 affs
            in and [approx x y | (x, y) <- zip procResult seqResult],
         -- -----------------------------------------------------------------------
