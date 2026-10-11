@@ -1,6 +1,6 @@
 {-# LANGUAGE DerivingStrategies #-}
 
--- | Linear state-space model as a 'Moore' and the associative-scan law.
+-- | Linear state-space model as a 'MooreT' and the associative-scan law.
 --
 -- A scalar linear SSM is the recurrence @h_t = a_t h_{t-1} + b_t@.  Each step
 -- is an affine function @(a_t, b_t)@; composition of affine functions is
@@ -33,7 +33,7 @@ module Circuit.LLM.SSM
     runMultiHeadSSMSystem,
     runSharedInputMultiHeadSSMSystem,
 
-    -- * Cell / Moore view
+    -- * Body / MooreT view
     ssmProcess,
     ssmSystem,
 
@@ -42,8 +42,9 @@ module Circuit.LLM.SSM
   )
 where
 
-import Circuit.GMachine (Cell (..), Moore, Stratum (..), moore)
+import Circuit.Machine (Body (..), Moore, MooreT (..), Step (..))
 import Circuit.Poly (Dir, Eval (..), Mono, Poly (PTensor), Pos, monoDir, monoIn)
+import Circuit.Tensor (Const (..))
 import Data.List (foldl1', scanl')
 import Data.Void (Void, absurd)
 import Harpie.Array (Array, zipWith)
@@ -113,22 +114,26 @@ chunkedScan k affs
 assocSSM :: Double -> [Aff] -> [Double]
 assocSSM h0 = map (\(Aff a b) -> a * h0 + b) . assocScan
 
--- | A 'Cell' whose state is the hidden state @h@ and whose output is @h@.
--- Input is the affine coefficient pair @(a_t, b_t)@; the initial state @h0@ is
--- supplied when converting to a 'Moore' or running directly.
-ssmSystem :: Cell (,) Double (->) Aff Double
-ssmSystem = Cell (\(h, aff) -> let Aff a b = aff in a * h + b) id
+-- | A 'Moore' body whose state is the hidden state @h@ and whose output is @h@.
+-- Input is the affine coefficient pair @(a_t, b_t)@.  The 'init' leg seeds with
+-- @h0 = 0@; rebuild 'init' from 'commit' for a non-zero seed (see the axioma
+-- checks).
+ssmSystem :: Moore (,) Double (->) Aff Double
+ssmSystem =
+  Body
+    (\aff -> let Aff _ b = aff in b)
+    (\(h, aff) -> let Aff a b = aff in a * h + b)
+    Const
 
--- | A 'Moore' whose state is the hidden state @h@ and whose output is @h@.
+-- | A 'MooreT' whose state is the hidden state @h@ and whose output is @h@.
 -- Input is the affine coefficient pair @(a_t, b_t)@.
 --
 -- This is the first-input-seeded presentation with @h0 = 0@.  The commit
 -- steps from the seed rather than reading it: the first state is
--- @step (h0, aff)@, so the seed is never observed and no input is dropped.
+-- @commit (0, aff)@, so the seed is never observed and no input is dropped.
 -- Vary the seed in the commit for a non-zero @h0@.
-ssmProcess :: Moore Aff Double
-ssmProcess = case ssmSystem of
-  Cell k o -> moore (\aff -> k (0, aff)) (curry k) o
+ssmProcess :: MooreT (,) (->) Aff Double
+ssmProcess = MooreT ssmSystem
 
 -- ---------------------------------------------------------------------------
 -- Vector (harpie) affine SSM — diagonal-matrix state
@@ -178,10 +183,10 @@ assocSSMVec h0 = map (\(AffVec a b) -> zipWith (+) (zipWith (*) a h0) b) . assoc
 
 -- | Run a deterministic monomial body over a list of inputs, returning
 -- the observations and the final state.  This is the same semantics as
--- 'Circuit.GMachine.scan' over the corresponding 'Moore', but stated
--- directly on the 'Stratum' view.
-mooreMorphism :: Stratum (,) s (->) (Either Void i) (o, ()) -> s -> [i] -> ([o], s)
-mooreMorphism (Stratum sys) s0 is = go s0 is []
+-- 'Circuit.Machine.scan' over the corresponding 'MooreT', but stated
+-- directly on the 'Step' view.
+mooreMorphism :: Step (,) (,) s s (->) (Either Void i) (o, ()) -> s -> [i] -> ([o], s)
+mooreMorphism (Step sys) s0 is = go s0 is []
   where
     go s [] acc = (reverse acc, s)
     go s (i : iss) acc =
@@ -190,8 +195,8 @@ mooreMorphism (Stratum sys) s0 is = go s0 is []
 
 -- | Vector SSM as a monomial body with harpie state, input 'AffVec', and
 -- full state observation.
-ssmSystemVec :: Stratum (,) (Array Double) (->) (Either Void AffVec) (Array Double, ())
-ssmSystemVec = Stratum $ \(h, d) ->
+ssmSystemVec :: Step (,) (,) (Array Double) (Array Double) (->) (Either Void AffVec) (Array Double, ())
+ssmSystemVec = Step $ \(h, d) ->
   let AffVec a b = monoDir d
       h' = zipWith (+) (zipWith (*) a h) b
    in (h', (h', ()))
@@ -210,8 +215,8 @@ type MultiHeadP = PTensor (Mono AffVec (Array Double)) (Mono AffVec (Array Doubl
 -- independent direction values.  This is the right polynomial for parallel
 -- layers: both heads fire on the same tick, each with its own input.  A
 -- cartesian 'Prod' would force a choice between heads via @Either@ directions.
-multiHeadSSMSystem :: Stratum (,) (Array Double, Array Double) (->) (Dir MultiHeadP) (Pos MultiHeadP)
-multiHeadSSMSystem = Stratum $ \case
+multiHeadSSMSystem :: Step (,) (,) (Array Double, Array Double) (Array Double, Array Double) (->) (Dir MultiHeadP) (Pos MultiHeadP)
+multiHeadSSMSystem = Step $ \case
   ((h1, h2), (Right aff1, Right aff2)) ->
     let AffVec a1 b1 = aff1
         AffVec a2 b2 = aff2
@@ -229,7 +234,7 @@ runMultiHeadSSMSystem ::
   [(AffVec, AffVec)] ->
   ([(Array Double, Array Double)], (Array Double, Array Double))
 runMultiHeadSSMSystem s0 affPairs =
-  let Stratum f = multiHeadSSMSystem
+  let Step f = multiHeadSSMSystem
       go s [] acc = (reverse acc, s)
       go (h1, h2) ((aff1, aff2) : affs') acc =
         let ((h1', h2'), ((o1, ()), (o2, ()))) = f ((h1, h2), (monoIn aff1, monoIn aff2))
@@ -252,8 +257,8 @@ runSharedInputMultiHeadSSMSystem s0 affs = runMultiHeadSSMSystem s0 [(aff, aff) 
 -- threaded through the shared medium matters, because head 1's update depends
 -- on head 2's state.  It is the "flip" oracle for the multi-head centrality
 -- pair.
-coupledMultiHeadSSMSystem :: Stratum (,) (Array Double, Array Double) (->) (Dir MultiHeadP) (Pos MultiHeadP)
-coupledMultiHeadSSMSystem = Stratum $ \case
+coupledMultiHeadSSMSystem :: Step (,) (,) (Array Double, Array Double) (Array Double, Array Double) (->) (Dir MultiHeadP) (Pos MultiHeadP)
+coupledMultiHeadSSMSystem = Step $ \case
   ((h1, h2), (Right aff1, Right aff2)) ->
     let AffVec a1 b1 = aff1
         AffVec a2 b2 = aff2

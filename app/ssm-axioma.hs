@@ -1,6 +1,5 @@
 module Main where
 
-import Circuit.GMachine (Cell (..), Stratum (..), moore, scan)
 import Circuit.LLM.Attention (causalMask, multiHeadAttention)
 import Circuit.LLM.SSM
   ( Aff (..),
@@ -23,6 +22,7 @@ import Circuit.LLM.SSM
     ssmSystem,
     ssmSystemVec,
   )
+import Circuit.Machine (Body (..), Step (..), moore, scan)
 import Circuit.Poly (monoIn)
 import Data.List (foldl', scanl')
 import Data.Vector.Unboxed qualified as V
@@ -147,7 +147,6 @@ main = do
       seqLen = 4
       nEmbd = 6
       nHead = 2
-      headDim = nEmbd `div` nHead
       -- Input: [seqLen, nEmbd]
       embed =
         array [seqLen, nEmbd] $
@@ -168,9 +167,9 @@ main = do
       ssmH0 = array [nEmbd] (replicate nEmbd 0.0)
       -- Convert each row of embed to an AffVec.
       toRows :: Array Double -> [Array Double]
-      toRows x =
-        let [n, d] = V.toList (shape x)
-         in [array [d] [x ! [r, c] | c <- [0 .. d - 1]] | r <- [0 .. n - 1]]
+      toRows x = case V.toList (shape x) of
+        [n, d] -> [array [d] [x ! [r, c] | c <- [0 .. d - 1]] | r <- [0 .. n - 1]]
+        dims -> error ("toRows: expected a [rows, cols] array, got shape " ++ show dims)
       embedRows = toRows embed
       affVecs = [AffVec ssmA row | row <- embedRows]
   results <-
@@ -247,11 +246,13 @@ main = do
                 multiHeadAttention nHead embed wEye wEye wEye wEye mask4
               -- SSM: one output per step; attention: one output for full sequence
               ssmRows = length ssmOut
-              [attnRows, attnCols] = V.toList (shape attnOut)
-           in ssmRows == seqLen
-                && attnRows == seqLen
-                && attnCols == nEmbd
-                && length ssmOut == length affVecs,
+           in case V.toList (shape attnOut) of
+                [attnRows, attnCols] ->
+                  ssmRows == seqLen
+                    && attnRows == seqLen
+                    && attnCols == nEmbd
+                    && length ssmOut == length affVecs
+                _ -> False,
         check "SSM multi-head Tensor with per-head inputs/states" $
           let h1 = array [3] [0, 1, 2]
               h2 = array [3] [3, 2, 1]
@@ -286,7 +287,7 @@ main = do
         check "SSM process carries h0 as a commit seed" $
           let h0 = 3.0
               affs = [Aff 0.5 1, Aff 0.5 2, Aff 0.5 3]
-              stepFromSeed = case ssmSystem of Cell {absorb = k} -> k
+              stepFromSeed = case ssmSystem of Body _ k _ -> k
               procResult = scan (moore (\aff -> stepFromSeed (h0, aff)) (curry stepFromSeed) id) affs
               seqResult = seqSSM h0 affs
            in and [approx x y | (x, y) <- zip procResult seqResult],
@@ -346,7 +347,7 @@ main = do
               aff2 = AffVec (array [1] [0.6]) (array [1] [2])
               (indOuts, _) = runMultiHeadSSMSystem (h1, h2) [(aff1, aff2)]
               (coupOuts, _) =
-                let Stratum f = coupledMultiHeadSSMSystem
+                let Step f = coupledMultiHeadSSMSystem
                     go s [] acc = (reverse acc, s)
                     go (x, y) ((a1, a2) : rest) acc =
                       let ((x', y'), ((o1, ()), (o2, ()))) = f ((x, y), (monoIn a1, monoIn a2))
