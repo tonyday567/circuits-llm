@@ -36,6 +36,7 @@ import Circuit.LLM.Diff
     zeroMatrix,
   )
 import Circuit.LLM.GPT (Gpt (..), GptConfig (..))
+import GHC.Float (log1p)
 import Numeric.LinearAlgebra
   ( Matrix,
     Vector,
@@ -248,61 +249,61 @@ layerNormBwd x gamma _beta eps gradY =
           gMu = -sumElements gXm
        in gXm + fromList (replicate features (gMu / d))
 
+-- | Fused cross-entropy loss and gradient over a batch of logit rows.
+--   See 'marginCE' for the form; supervised rows' gradients sum to zero
+--   past the floating-point cliff where the textbook @softmax - onehot@
+--   form rounds the target gradient to exactly zero.
 crossEntropyBwd :: Matrix Double -> [Int] -> (Double, Matrix Double)
 crossEntropyBwd logits targetIds =
   let n = fromIntegral (rows logits)
-      softmaxRows = map softmaxStable (toRows logits)
-      losses = zipWith (\p t -> -log (max (toList p !! t) 1e-12)) softmaxRows targetIds
-      totalLoss = sum losses / n
-      gradRows =
-        zipWith
-          ( \p t ->
-              let pv = toList p
-               in fromList [if i == t then pv !! i - 1 else pv !! i | i <- [0 .. length pv - 1]]
-          )
-          softmaxRows
-          targetIds
+      rows' = zipWith (marginCE . toList) (toRows logits) targetIds
+      totalLoss = sum (map fst rows') / n
+      gradRows = map snd rows'
    in (totalLoss, scale (1 / n) (fromRows gradRows))
+
+-- | Margin-form cross-entropy for one logit row with hard target t
+--   (Barron et al. 2026, arXiv:2610.31642, Softmax Collapse fix). With
+--   m = z_t - LSE(others), loss = softplus(-m) and
+--   g_j = exp(z_j - z_t - loss) for j /= t, g_t = -sum others, so the
+--   gradient sums to zero down to exponent underflow. The textbook
+--   @softmax - onehot@ form rounds the target gradient to exactly zero
+--   past the floating-point cliff (margin ~36.7 in Double), leaving a
+--   sum-nonzero residue; this form does not.
+marginCE :: [Double] -> Int -> (Double, Vector Double)
+marginCE zv t =
+  let len = length zv
+      others = [j | j <- [0 .. len - 1], j /= t]
+      lseOthers = logSumExp [zv !! j | j <- others]
+      m = (zv !! t) - lseOthers
+      loss = softplus (-m)
+      gOthers = [if j == t then 0 else exp ((zv !! j) - (zv !! t) - loss) | j <- [0 .. len - 1]]
+      gt = -sum gOthers
+   in (loss, fromList [if j == t then gt else gOthers !! j | j <- [0 .. len - 1]])
   where
-    softmaxStable v =
-      let mx = maxElement v; shifted = cmap (\x -> exp (x - mx)) v
-       in scale (1 / sumElements shifted) shifted
+    logSumExp xs =
+      let mx = maximum xs
+       in mx + log (sum [exp (x - mx) | x <- xs])
+    softplus x =
+      let ax = abs x
+       in max x 0 + log1p (exp (-ax))
 
 -- | Masked cross-entropy for BERT-style training.
 --   The mask indicates which positions are supervised; loss and gradients are
---   averaged only over those positions.
+--   averaged only over those positions. Supervised rows use the same
+--   margin form as 'crossEntropyBwd'; unsupervised rows contribute zero
+--   loss and zero gradient.
 maskedCrossEntropyBwd :: Matrix Double -> [Int] -> [Bool] -> (Double, Matrix Double)
 maskedCrossEntropyBwd logits targetIds mask =
   let maskedCount = fromIntegral (length (filter id mask))
-      vocab = cols logits
-      softmaxRows = map softmaxStable (toRows logits)
-      maskedLosses =
-        zipWith3
-          ( \p t m ->
-              if m then -log (max (toList p !! t) 1e-12) else 0
-          )
-          softmaxRows
-          targetIds
-          mask
-      totalLoss = if maskedCount == 0 then 0 else sum maskedLosses / maskedCount
-      gradRows =
-        zipWith
-          ( \p (t, m) ->
-              if m
-                then
-                  let pv = toList p
-                   in fromList [if i == t then pv !! i - 1 else pv !! i | i <- [0 .. length pv - 1]]
-                else fromList (replicate vocab 0)
-          )
-          softmaxRows
-          (zip targetIds mask)
+      rows' = zipWith3 rowCE (toRows logits) targetIds mask
+      totalLoss = if maskedCount == 0 then 0 else sum (map fst rows') / maskedCount
+      gradRows = map snd rows'
    in if maskedCount == 0
         then (0, zeroMatrix (rows logits) (cols logits))
         else (totalLoss, scale (1 / maskedCount) (fromRows gradRows))
   where
-    softmaxStable v =
-      let mx = maxElement v; shifted = cmap (\x -> exp (x - mx)) v
-       in scale (1 / sumElements shifted) shifted
+    rowCE z t True = marginCE (toList z) t
+    rowCE z _ False = (0, fromList (replicate (length (toList z)) 0))
 
 -- | Convert a flat 'BlockParams' (used as the parameter/gradient carrier in
 --   'DiffP') back to the existing 'BlockGrads' record.
