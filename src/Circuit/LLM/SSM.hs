@@ -42,9 +42,9 @@ module Circuit.LLM.SSM
   )
 where
 
-import Circuit.Machine (Body (..), Moore, MooreT (..), Step (..))
+import Circuit.Machine (Moore (Moore), MooreT (..))
+import Circuit.Step (Step (..))
 import Circuit.Poly (Dir, Eval (..), Mono, Poly (PTensor), Pos, monoDir, monoIn)
-import Circuit.Tensor (Const (..))
 import Data.List (foldl1', scanl')
 import Data.Void (Void, absurd)
 import Harpie.Array (Array, zipWith)
@@ -120,10 +120,10 @@ assocSSM h0 = map (\(Aff a b) -> a * h0 + b) . assocScan
 -- checks).
 ssmSystem :: Moore (,) Double (->) Aff Double
 ssmSystem =
-  Body
+  Moore
     (\aff -> let Aff _ b = aff in b)
     (\(h, aff) -> let Aff a b = aff in a * h + b)
-    Const
+    id
 
 -- | A 'MooreT' whose state is the hidden state @h@ and whose output is @h@.
 -- Input is the affine coefficient pair @(a_t, b_t)@.

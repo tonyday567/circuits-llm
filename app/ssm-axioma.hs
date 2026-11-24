@@ -22,7 +22,8 @@ import Circuit.LLM.SSM
     ssmSystem,
     ssmSystemVec,
   )
-import Circuit.Machine (Body (..), Step (..), moore, scan)
+import Circuit.Machine (Moore (Moore), moore, scan)
+import Circuit.Step (Step (..))
 import Circuit.Poly (monoIn)
 import Data.List (foldl', scanl')
 import Data.Vector.Unboxed qualified as V
@@ -287,7 +288,7 @@ main = do
         check "SSM process carries h0 as a commit seed" $
           let h0 = 3.0
               affs = [Aff 0.5 1, Aff 0.5 2, Aff 0.5 3]
-              stepFromSeed = case ssmSystem of Body _ k _ -> k
+              stepFromSeed = case ssmSystem of Moore _ k _ -> k
               procResult = scan (moore (\aff -> stepFromSeed (h0, aff)) (curry stepFromSeed) id) affs
               seqResult = seqSSM h0 affs
            in and [approx x y | (x, y) <- zip procResult seqResult],
